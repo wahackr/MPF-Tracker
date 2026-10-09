@@ -95,7 +95,7 @@ services:
       mpf-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"from crawler_worker.db import ping_database; import sys; sys.exit(0 if ping_database() else 1)\""]
+      test: ["CMD-SHELL", "python -c \"from crawler_worker.libs.db import ping_database; import sys; sys.exit(0 if ping_database() else 1)\""]
       interval: 30s
       timeout: 5s
       retries: 5

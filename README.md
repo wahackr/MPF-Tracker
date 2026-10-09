@@ -20,15 +20,18 @@ There is no shared application-code directory. Modules are coupled only via Post
 .
 ├── compose.yaml
 ├── crawler/
-│   ├── api/
-│   └── worker/
-├── portfolio/
-├── purchase/
-├── valuation/
+│   ├── api/src/              # app.ts, main.ts, libs/, __tests__/
+│   ├── tests/
+│   │   ├── contracts/
+│   │   └── integration/
+│   └── worker/src/           # app.py, main.py, libs/, __tests__/
+├── portfolio/src/            # app.ts, main.ts, routes/, libs/, __tests__/
+├── purchase/src/             # app.ts, main.ts, libs/, __tests__/
+├── valuation/src/            # app.ts, main.ts, libs/, __tests__/
 ├── migrations/
 ├── scripts/
 ├── n8n/workflows/
-└── tests/
+└── pytest.ini
 ```
 
 ## Quick start
@@ -64,6 +67,7 @@ See [`.env.example`](./.env.example).
 
 - `CRAWLER_USE_FIXTURES=false` by default (live crawling by default)
 - Set `CRAWLER_USE_FIXTURES=true` explicitly for local deterministic tests/dev
+- Optional `CRAWLER_FIXTURE_DIR` can override fixture path (auto-detects container/local defaults otherwise)
 - `WORKER_POLL_INTERVAL_SECONDS`, `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` control crawler worker leasing
 
 ## API overview
@@ -124,12 +128,14 @@ All `/v1/*` routes require `X-API-Key`.
 Importable examples are under [`n8n/workflows/`](./n8n/workflows/):
 
 1. Daily crawler sync
-2. Weekly crawler backfill
+2. Manual HSBC backfill for recovery (Manulife history requires a verified source schema)
 3. Expected purchase processing
 4. Daily valuation snapshot
 5. On-demand valuation
 
 n8n communicates via HTTP only.
+The daily crawler example polls the queued job to a terminal status and fails its run on
+`partial` or `failed`. The manual backfill example avoids an automatic broad history crawl.
 
 ## Testing
 
@@ -137,8 +143,9 @@ Unit tests:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt -r crawler/worker/requirements.txt
 .venv/bin/python -m pytest -q
+for service in crawler/api portfolio purchase valuation; do (cd "$service" && npm test); done
 ```
 
 Integration tests (dockerized, includes container-isolation assertions):
@@ -146,6 +153,15 @@ Integration tests (dockerized, includes container-isolation assertions):
 ```bash
 .venv/bin/python -m pytest -m integration -q
 ```
+
+Live crawler smoke tests (real provider APIs, opt-in):
+
+```bash
+MPF_RUN_LIVE_TESTS=1 .venv/bin/python -m pytest -m live -q
+```
+
+By default these tests are skipped unless `MPF_RUN_LIVE_TESTS=1` is set.
+Run one provider at a time with `MPF_RUN_LIVE_TESTS=1 .venv/bin/python -m pytest -q crawler/worker/src/__tests__/live/test_hsbc_live.py` or the corresponding `test_manulife_live.py` path.
 
 ## Known limitations / explicit caveats
 

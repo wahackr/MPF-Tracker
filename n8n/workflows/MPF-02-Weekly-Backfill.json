@@ -3,6 +3,7 @@
   "nodes": [
     {
       "parameters": {
+        "timezone": "Asia/Hong_Kong",
         "rule": {
           "interval": [
             {
@@ -24,7 +25,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://mpf-crawler:8000/v1/crawl/jobs/backfill",
+        "url": "http://mpf-crawler-api:8000/v1/crawl/jobs/backfill",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -65,4 +66,3 @@
   "settings": {},
   "pinData": {}
 }
-

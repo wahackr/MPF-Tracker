@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
-from services.crawler.app.parsers import (
+WORKER_SRC_DIR = Path("/home/wah/Workspaces/MPF-Tracker/crawler/worker/src")
+if str(WORKER_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKER_SRC_DIR))
+
+from parsers import (  # type: ignore[import-not-found]
     ParseError,
     parse_hsbc_all_funds_csv,
     parse_manulife_fundhistory,
@@ -96,4 +101,3 @@ def test_manulife_fundhistory_parser_handles_known_shape() -> None:
     assert len(history) == 2
     assert history[0].price_date.isoformat() == "2026-10-01"
     assert str(history[0].nav) == "17.1"
-

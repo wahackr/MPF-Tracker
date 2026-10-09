@@ -3,6 +3,7 @@
   "nodes": [
     {
       "parameters": {
+        "timezone": "Asia/Hong_Kong",
         "rule": {
           "interval": [
             {
@@ -24,7 +25,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://mpf-valuation:8000/v1/valuation/jobs/snapshot",
+        "url": "http://mpf-valuation:8000/v1/valuation/snapshot",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -39,7 +40,7 @@
         "jsonBody": "{\"as_of_date\":\"={{$now.toFormat('yyyy-MM-dd')}}\"}"
       },
       "id": "http-valuation-snapshot",
-      "name": "Trigger valuation snapshot",
+      "name": "Run valuation snapshot",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -53,7 +54,7 @@
       "main": [
         [
           {
-            "node": "Trigger valuation snapshot",
+            "node": "Run valuation snapshot",
             "type": "main",
             "index": 0
           }
@@ -65,4 +66,3 @@
   "settings": {},
   "pinData": {}
 }
-

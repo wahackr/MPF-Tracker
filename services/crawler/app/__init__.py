@@ -1,2 +1,0 @@
-"""Crawler FastAPI app package."""
-

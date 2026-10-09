@@ -104,7 +104,7 @@ except urllib.error.HTTPError as error:
             "exec",
             "-T",
             *exec_env_args,
-            "mpf-crawler",
+            "mpf-crawler-worker",
             "python",
             "-c",
             script,
@@ -210,12 +210,13 @@ def _reset_postgres_bind_mount() -> None:
 
 
 def _wait_for_health(harness: ComposeHarness) -> None:
-    required_services = ("mpf-crawler", "mpf-portfolio", "mpf-purchase", "mpf-valuation")
+    required_services = ("mpf-crawler-api", "mpf-crawler-worker", "mpf-portfolio", "mpf-purchase", "mpf-valuation")
+    api_services = ("mpf-crawler-api", "mpf-portfolio", "mpf-purchase", "mpf-valuation")
     deadline = time.time() + 120
     while time.time() < deadline:
         ps = harness.compose(["ps", "-a"], check=False).stdout
         if all(_service_healthy(ps, service) for service in required_services) and _migrate_finished(ps):
-            for service in required_services:
+            for service in api_services:
                 status, body = harness.api_request(
                     service_host=service,
                     method="GET",
@@ -250,7 +251,7 @@ def integration_harness() -> ComposeHarness:
 
     env = os.environ.copy()
     env["COMPOSE_PROJECT_NAME"] = COMPOSE_PROJECT
-    env["ENABLE_JOB_WORKER"] = "true"
+    env["CRAWLER_USE_FIXTURES"] = "true"
 
     harness = ComposeHarness(repo_root=REPO_ROOT, env=env)
     harness.compose(["down"], check=False)

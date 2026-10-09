@@ -1,2 +1,0 @@
-"""Valuation service package."""
-

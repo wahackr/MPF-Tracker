@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import date
 from typing import Any
 from uuid import UUID
@@ -12,7 +11,7 @@ pytestmark = pytest.mark.integration
 
 def test_crawler_sync_idempotent(integration_harness: Any) -> None:
     status, created = integration_harness.api_request(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         method="POST",
         path="/v1/crawl/jobs/sync",
         payload={"provider": "all", "rolling_days": 7},
@@ -20,7 +19,7 @@ def test_crawler_sync_idempotent(integration_harness: Any) -> None:
     )
     assert status == 202
     job = integration_harness.poll_job(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         job_path_prefix="/v1/crawl/jobs",
         job_id=created["job_id"],
     )
@@ -34,7 +33,7 @@ def test_crawler_sync_idempotent(integration_harness: Any) -> None:
     assert valuation_jobs == 0
 
     status, created = integration_harness.api_request(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         method="POST",
         path="/v1/crawl/jobs/sync",
         payload={"provider": "all", "rolling_days": 7},
@@ -42,7 +41,7 @@ def test_crawler_sync_idempotent(integration_harness: Any) -> None:
     )
     assert status == 202
     job = integration_harness.poll_job(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         job_path_prefix="/v1/crawl/jobs",
         job_id=created["job_id"],
     )
@@ -52,7 +51,7 @@ def test_crawler_sync_idempotent(integration_harness: Any) -> None:
     assert job["result"]["price_rows_unchanged"] == 595
 
     status, funds_response = integration_harness.api_request(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         method="GET",
         path="/v1/funds?limit=200",
     )
@@ -62,7 +61,7 @@ def test_crawler_sync_idempotent(integration_harness: Any) -> None:
 
 def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None:
     _, funds_response = integration_harness.api_request(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         method="GET",
         path="/v1/funds?limit=200",
     )
@@ -107,7 +106,7 @@ def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None
                 ],
             },
         )
-        assert status == 202
+        assert status == 200
 
     _wait_for_holdings(integration_harness, hsbc_account["account_id"], expected_count=2)
     _wait_for_holdings(integration_harness, manulife_account["account_id"], expected_count=2)
@@ -129,7 +128,7 @@ def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None
                 ],
             },
         )
-        assert status == 202
+        assert status == 200
 
         status, _ = integration_harness.api_request(
             service_host="mpf-portfolio",
@@ -142,62 +141,44 @@ def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None
                 "effective_from": "2026-10-01",
             },
         )
-        assert status == 202
+        assert status == 200
 
     _wait_for_active_contribution_plans(integration_harness, expected_count=2)
     _wait_for_allocation_rules(integration_harness, expected_count=4)
 
     before_tx = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.purchase_transactions"))
-    status, created = integration_harness.api_request(
+    status, process_result = integration_harness.api_request(
         service_host="mpf-purchase",
         method="POST",
-        path="/v1/purchase/jobs/process-due",
+        path="/v1/purchases/process",
         payload={"as_of_date": "2026-10-07"},
     )
-    assert status == 202
-    job = integration_harness.poll_job(
-        service_host="mpf-purchase",
-        job_path_prefix="/v1/purchase/jobs",
-        job_id=created["job_id"],
-    )
-    assert job["status"] == "succeeded"
-    assert job["result"]["processed_events"] == 2
-    assert job["result"]["inserted_transactions"] == 2
+    assert status == 200
+    assert process_result["processed_events"] == 2
+    assert process_result["inserted_transactions"] == 2
     after_tx = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.purchase_transactions"))
     assert after_tx - before_tx == 2
 
-    status, created = integration_harness.api_request(
+    status, second_result = integration_harness.api_request(
         service_host="mpf-purchase",
         method="POST",
-        path="/v1/purchase/jobs/process-due",
+        path="/v1/purchases/process",
         payload={"as_of_date": "2026-10-07"},
     )
-    assert status == 202
-    job = integration_harness.poll_job(
-        service_host="mpf-purchase",
-        job_path_prefix="/v1/purchase/jobs",
-        job_id=created["job_id"],
-    )
-    assert job["status"] == "succeeded"
-    assert job["result"]["inserted_transactions"] == 0
+    assert status == 200
+    assert second_result["inserted_transactions"] == 0
     after_tx_second = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.purchase_transactions"))
     assert after_tx_second == after_tx
 
     before_snapshot = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.portfolio_snapshots"))
-    status, created = integration_harness.api_request(
+    status, snapshot_result = integration_harness.api_request(
         service_host="mpf-valuation",
         method="POST",
-        path="/v1/valuation/jobs/snapshot",
+        path="/v1/valuation/snapshot",
         payload={"as_of_date": "2026-10-07"},
     )
-    assert status == 202
-    job = integration_harness.poll_job(
-        service_host="mpf-valuation",
-        job_path_prefix="/v1/valuation/jobs",
-        job_id=created["job_id"],
-    )
-    assert job["status"] == "succeeded"
-    assert job["result"]["saved_accounts"] == 2
+    assert status == 200
+    assert snapshot_result["saved_accounts"] == 2
     after_snapshot = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.portfolio_snapshots"))
     assert after_snapshot - before_snapshot == 2
 
@@ -243,7 +224,7 @@ def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None
 
 def test_backfill_reports_unverified_fundhistory(integration_harness: Any) -> None:
     status, created = integration_harness.api_request(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         method="POST",
         path="/v1/crawl/jobs/backfill",
         payload={
@@ -256,7 +237,7 @@ def test_backfill_reports_unverified_fundhistory(integration_harness: Any) -> No
     )
     assert status == 202
     job = integration_harness.poll_job(
-        service_host="mpf-crawler",
+        service_host="mpf-crawler-api",
         job_path_prefix="/v1/crawl/jobs",
         job_id=created["job_id"],
     )
@@ -287,27 +268,19 @@ def test_db_role_restrictions(integration_harness: Any) -> None:
 
 
 def test_service_containers_do_not_include_other_service_sources(integration_harness: Any) -> None:
-    service_map = {
-        "mpf-crawler": "crawler",
-        "mpf-portfolio": "portfolio",
-        "mpf-purchase": "purchase",
-        "mpf-valuation": "valuation",
+    service_commands = {
+        "mpf-crawler-api": "test ! -d /app/portfolio && test ! -d /app/purchase && test ! -d /app/valuation && test ! -d /app/shared",
+        "mpf-crawler-worker": "test ! -d /app/shared && test -d /app/crawler_worker",
+        "mpf-portfolio": "test ! -d /app/crawler && test ! -d /app/purchase && test ! -d /app/valuation && test ! -d /app/shared",
+        "mpf-purchase": "test ! -d /app/crawler && test ! -d /app/portfolio && test ! -d /app/valuation && test ! -d /app/shared",
+        "mpf-valuation": "test ! -d /app/crawler && test ! -d /app/portfolio && test ! -d /app/purchase && test ! -d /app/shared",
     }
-    script = (
-        "import json, os;"
-        "services=['crawler','portfolio','purchase','valuation'];"
-        "print(json.dumps({name: os.path.isdir(f'/app/services/{name}') for name in services}))"
-    )
-    for compose_service, owned_service in service_map.items():
+    for compose_service, command in service_commands.items():
         result = integration_harness.compose(
-            ["exec", "-T", compose_service, "python", "-c", script]
+            ["exec", "-T", compose_service, "sh", "-lc", command],
+            check=False,
         )
-        present = json.loads(result.stdout.strip())
-        for service_name, exists in present.items():
-            if service_name == owned_service:
-                assert exists is True
-            else:
-                assert exists is False
+        assert result.returncode == 0, f"isolation check failed for {compose_service}: {result.stderr}"
 
 
 def _wait_for_holdings(harness: Any, account_id: str, expected_count: int) -> None:

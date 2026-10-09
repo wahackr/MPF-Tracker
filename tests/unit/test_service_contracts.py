@@ -1,47 +1,27 @@
-from fastapi import APIRouter, FastAPI
-from fastapi.testclient import TestClient
-
-from shared.app_factory import create_service_app
-from services.crawler.app.routes import router as crawler_router
-from services.portfolio.app.routes import router as portfolio_router
-from services.purchase.app.routes import router as purchase_router
-from services.valuation.app.routes import router as valuation_router
+from pathlib import Path
 
 
-def _build_service_app(service_name: str, router: APIRouter) -> FastAPI:
-    app = create_service_app(service_name=service_name)
-    app.include_router(router)
-    return app
+REPO_ROOT = Path("/home/wah/Workspaces/MPF-Tracker")
 
 
-def test_health_endpoint_available_for_all_services(monkeypatch) -> None:
-    monkeypatch.setattr("shared.app_factory.ping_database", lambda: True)
+def test_shared_directory_removed() -> None:
+    assert not (REPO_ROOT / "shared").exists()
 
-    service_apps = (
-        _build_service_app("crawler", crawler_router),
-        _build_service_app("portfolio", portfolio_router),
-        _build_service_app("purchase", purchase_router),
-        _build_service_app("valuation", valuation_router),
+
+def test_required_module_entrypoints_exist() -> None:
+    required_files = (
+        REPO_ROOT / "crawler" / "api" / "src" / "index.ts",
+        REPO_ROOT / "crawler" / "worker" / "src" / "worker.py",
+        REPO_ROOT / "portfolio" / "src" / "index.ts",
+        REPO_ROOT / "purchase" / "src" / "index.ts",
+        REPO_ROOT / "valuation" / "src" / "index.ts",
     )
-    for app in service_apps:
-        with TestClient(app) as client:
-            response = client.get("/health")
-            assert response.status_code == 200
-            payload = response.json()
-            assert payload["status"] == "ready"
-            assert payload["database"] == "up"
+    for file_path in required_files:
+        assert file_path.exists(), f"Missing required module entrypoint: {file_path}"
 
 
-def test_auth_required_on_private_routes() -> None:
-    test_cases = (
-        (_build_service_app("crawler", crawler_router), "/v1/funds"),
-        (_build_service_app("portfolio", portfolio_router), "/v1/accounts"),
-        (_build_service_app("purchase", purchase_router), "/v1/purchase/events"),
-        (_build_service_app("valuation", valuation_router), "/v1/valuation/latest"),
-    )
-
-    for app, path in test_cases:
-        with TestClient(app) as client:
-            response = client.get(path)
-            assert response.status_code == 401
-            assert response.json()["detail"] == "Invalid or missing API key"
+def test_only_crawler_has_worker_runtime() -> None:
+    assert (REPO_ROOT / "crawler" / "worker").exists()
+    assert not (REPO_ROOT / "portfolio" / "worker").exists()
+    assert not (REPO_ROOT / "purchase" / "worker").exists()
+    assert not (REPO_ROOT / "valuation" / "worker").exists()

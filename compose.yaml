@@ -42,32 +42,29 @@ services:
     networks:
       - mpf-internal
 
-  mpf-crawler:
+  mpf-crawler-api:
     build:
       context: .
-      dockerfile: services/crawler/Dockerfile
+      dockerfile: crawler/api/Dockerfile
     restart: unless-stopped
     expose:
       - "8000"
     environment:
-      SERVICE_NAME: crawler
       API_KEY: ${API_KEY}
-      HEALTH_DB_REQUIRED: ${HEALTH_DB_REQUIRED}
-      ENABLE_JOB_WORKER: ${ENABLE_JOB_WORKER}
-      CRAWLER_USE_FIXTURES: ${CRAWLER_USE_FIXTURES}
       DB_HOST: ${POSTGRES_HOST}
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}
       DB_USER: mpf_crawler
       DB_PASSWORD: ${CRAWLER_DB_PASSWORD}
       TZ: ${TZ}
+      PORT: 8000
     depends_on:
       mpf-db:
         condition: service_healthy
       mpf-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -76,23 +73,21 @@ services:
       - mpf-internal
       - n8n-network
 
-  mpf-portfolio:
+  mpf-crawler-worker:
     build:
       context: .
-      dockerfile: services/portfolio/Dockerfile
+      dockerfile: crawler/worker/Dockerfile
     restart: unless-stopped
-    expose:
-      - "8000"
     environment:
-      SERVICE_NAME: portfolio
-      API_KEY: ${API_KEY}
-      HEALTH_DB_REQUIRED: ${HEALTH_DB_REQUIRED}
-      ENABLE_JOB_WORKER: ${ENABLE_JOB_WORKER}
       DB_HOST: ${POSTGRES_HOST}
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}
-      DB_USER: mpf_portfolio
-      DB_PASSWORD: ${PORTFOLIO_DB_PASSWORD}
+      DB_USER: mpf_crawler
+      DB_PASSWORD: ${CRAWLER_DB_PASSWORD}
+      CRAWLER_USE_FIXTURES: ${CRAWLER_USE_FIXTURES}
+      WORKER_POLL_INTERVAL_SECONDS: ${WORKER_POLL_INTERVAL_SECONDS}
+      WORKER_LEASE_SECONDS: ${WORKER_LEASE_SECONDS}
+      WORKER_HEARTBEAT_SECONDS: ${WORKER_HEARTBEAT_SECONDS}
       TZ: ${TZ}
     depends_on:
       mpf-db:
@@ -100,7 +95,37 @@ services:
       mpf-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      test: ["CMD-SHELL", "python -c \"from crawler_worker.db import ping_database; import sys; sys.exit(0 if ping_database() else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - mpf-internal
+
+  mpf-portfolio:
+    build:
+      context: .
+      dockerfile: portfolio/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      API_KEY: ${API_KEY}
+      DB_HOST: ${POSTGRES_HOST}
+      DB_PORT: ${POSTGRES_PORT}
+      DB_NAME: ${POSTGRES_DB}
+      DB_USER: mpf_portfolio
+      DB_PASSWORD: ${PORTFOLIO_DB_PASSWORD}
+      TZ: ${TZ}
+      PORT: 8000
+    depends_on:
+      mpf-db:
+        condition: service_healthy
+      mpf-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -112,28 +137,26 @@ services:
   mpf-purchase:
     build:
       context: .
-      dockerfile: services/purchase/Dockerfile
+      dockerfile: purchase/Dockerfile
     restart: unless-stopped
     expose:
       - "8000"
     environment:
-      SERVICE_NAME: purchase
       API_KEY: ${API_KEY}
-      HEALTH_DB_REQUIRED: ${HEALTH_DB_REQUIRED}
-      ENABLE_JOB_WORKER: ${ENABLE_JOB_WORKER}
       DB_HOST: ${POSTGRES_HOST}
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}
       DB_USER: mpf_purchase
       DB_PASSWORD: ${PURCHASE_DB_PASSWORD}
       TZ: ${TZ}
+      PORT: 8000
     depends_on:
       mpf-db:
         condition: service_healthy
       mpf-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -145,28 +168,26 @@ services:
   mpf-valuation:
     build:
       context: .
-      dockerfile: services/valuation/Dockerfile
+      dockerfile: valuation/Dockerfile
     restart: unless-stopped
     expose:
       - "8000"
     environment:
-      SERVICE_NAME: valuation
       API_KEY: ${API_KEY}
-      HEALTH_DB_REQUIRED: ${HEALTH_DB_REQUIRED}
-      ENABLE_JOB_WORKER: ${ENABLE_JOB_WORKER}
       DB_HOST: ${POSTGRES_HOST}
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}
       DB_USER: mpf_valuation
       DB_PASSWORD: ${VALUATION_DB_PASSWORD}
       TZ: ${TZ}
+      PORT: 8000
     depends_on:
       mpf-db:
         condition: service_healthy
       mpf-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 30s
       timeout: 5s
       retries: 5

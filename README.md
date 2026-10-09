@@ -1,64 +1,45 @@
 # MPF Portfolio Tracker
 
-Self-hosted MPF tracking system using four independent FastAPI services and one PostgreSQL database.
+Modular MPF tracker with four independently deployable application modules and one shared PostgreSQL database.
 
-## Services
+## Application modules
 
-- `mpf-crawler` — fund metadata + price ingestion
-- `mpf-portfolio` — accounts, baselines, allocation rules, contribution plans, reconciliations
-- `mpf-purchase` — expected contribution event processing and estimated/confirmed purchase transactions
-- `mpf-valuation` — on-demand read-only valuation plus snapshot/rebuild jobs
-- `mpf-db` — PostgreSQL
+- `mpf-crawler-api` (TypeScript + Express): enqueue crawler jobs, query crawler job status, list funds/prices
+- `mpf-crawler-worker` (Python daemon): executes crawler jobs from `mpf.jobs`
+- `mpf-portfolio` (TypeScript + Express): account, baseline, allocation, contribution-plan, reconciliation APIs (direct execution)
+- `mpf-purchase` (TypeScript + Express): expected purchase processing + confirmation APIs (direct execution)
+- `mpf-valuation` (TypeScript + Express): valuation snapshot/rebuild/query APIs (direct execution)
+- `mpf-db` (PostgreSQL)
+- `mpf-migrate` (one-shot migration runner)
 
-All services are independent containers. n8n is expected to schedule and trigger them independently over internal HTTP.
+There is no shared application-code directory. Modules are coupled only via PostgreSQL schema contracts.
 
-## Repo layout
+## Repository layout
 
 ```text
 .
 ├── compose.yaml
+├── crawler/
+│   ├── api/
+│   └── worker/
+├── portfolio/
+├── purchase/
+├── valuation/
 ├── migrations/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── sql/
-├── mpf-codex-handoff/fixtures/
 ├── scripts/
-├── services/
-│   ├── crawler/
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   ├── portfolio/
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   ├── purchase/
-│   │   ├── Dockerfile
-│   │   └── requirements.txt
-│   └── valuation/
-│       ├── Dockerfile
-│       └── requirements.txt
-├── shared/
+├── n8n/workflows/
 └── tests/
 ```
 
-## Container isolation model
-
-- Each application service has its own Dockerfile, entrypoint, and dependency definition.
-- Service images copy only:
-  - `shared/` infrastructure utilities
-  - `services/__init__.py`
-  - their own service package (`services/<service>/`)
-- The crawler image additionally includes fixture data under `mpf-codex-handoff/fixtures/`.
-- No service image copies unrelated service source directories.
-
 ## Quick start
 
-1. Create `.env` from sample:
+1. Copy environment file:
 
    ```bash
    cp .env.example .env
    ```
 
-2. Ensure private Docker network for n8n connectivity exists:
+2. Ensure private n8n network exists:
 
    ```bash
    docker network inspect automation >/dev/null 2>&1 || docker network create automation
@@ -70,126 +51,87 @@ All services are independent containers. n8n is expected to schedule and trigger
    docker compose up -d --build
    ```
 
-4. Check all services:
+4. Check status:
 
    ```bash
    docker compose ps -a
    docker compose logs -f mpf-migrate
    ```
 
-## Security / access
+## Environment highlights
 
-- `/health` is public.
-- All `/v1/*` endpoints require `X-API-Key`.
-- Services expose internal port `8000` with Docker `expose` only (no host port mapping by default).
-- PostgreSQL is not published to host by default.
+See [`.env.example`](./.env.example).
 
-## Environment variables
-
-See [.env.example](./.env.example). Key settings:
-
-- `ENABLE_JOB_WORKER=true` — enables background job processing loops
-- `CRAWLER_USE_FIXTURES=true` — use supplied real fixtures from [mpf-codex-handoff/fixtures/](./mpf-codex-handoff/fixtures/)
-- `N8N_NETWORK=automation` — external Docker network name shared with n8n
+- `CRAWLER_USE_FIXTURES=false` by default (live crawling by default)
+- Set `CRAWLER_USE_FIXTURES=true` explicitly for local deterministic tests/dev
+- `WORKER_POLL_INTERVAL_SECONDS`, `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` control crawler worker leasing
 
 ## API overview
 
-### Crawler (`mpf-crawler`)
+All `/v1/*` routes require `X-API-Key`.
+
+### Crawler API
 
 - `POST /v1/crawl/jobs/sync`
 - `POST /v1/crawl/jobs/backfill`
 - `GET /v1/crawl/jobs/{job_id}`
 - `GET /v1/funds`
+- `GET /v1/funds/{fund_id}/prices`
 
-### Portfolio (`mpf-portfolio`)
+### Portfolio API
 
-- `POST /v1/accounts`
 - `GET /v1/accounts`
-- `POST /v1/accounts/{id}/baselines`
+- `POST /v1/accounts`
+- `GET /v1/accounts/{id}`
+- `PUT /v1/accounts/{id}`
 - `GET /v1/accounts/{id}/holdings`
+- `POST /v1/accounts/{id}/baselines`
+- `GET /v1/accounts/{id}/allocation-rules`
 - `PUT /v1/accounts/{id}/allocation-rules`
+- `GET /v1/accounts/{id}/contribution-plans`
 - `PUT /v1/accounts/{id}/contribution-plans`
 - `POST /v1/accounts/{id}/reconciliations`
 
-### Purchase (`mpf-purchase`)
+### Purchase API
 
-- `POST /v1/purchase/jobs/process-due`
-- `GET /v1/purchase/jobs/{job_id}`
-- `GET /v1/purchase/events`
-- `POST /v1/purchase/events/{id}/confirm`
+- `POST /v1/purchases/process`
+- `GET /v1/purchases/events`
+- `GET /v1/purchases/transactions`
+- `POST /v1/purchases/events/{event_id}/confirm`
 
-### Valuation (`mpf-valuation`)
+### Valuation API
 
-- `POST /v1/valuation/jobs/snapshot`
-- `GET /v1/valuation/jobs/{job_id}`
+- `POST /v1/valuation/snapshot`
+- `POST /v1/valuation/rebuild`
 - `GET /v1/valuation/latest`
 - `GET /v1/valuation/as-of?date=YYYY-MM-DD`
 - `GET /v1/valuation/history`
-- `POST /v1/valuation/jobs/rebuild`
 
-## Example calls
+### Health
 
-```bash
-curl -X POST http://mpf-crawler:8000/v1/crawl/jobs/sync \
-  -H "X-API-Key: ${API_KEY}" \
-  -H 'Content-Type: application/json' \
-  -d '{"provider":"all","rolling_days":7}'
-
-curl -X POST http://mpf-purchase:8000/v1/purchase/jobs/process-due \
-  -H "X-API-Key: ${API_KEY}" \
-  -H 'Content-Type: application/json' \
-  -d '{"as_of_date":"2026-10-07"}'
-
-curl -X POST http://mpf-valuation:8000/v1/valuation/jobs/snapshot \
-  -H "X-API-Key: ${API_KEY}" \
-  -H 'Content-Type: application/json' \
-  -d '{"as_of_date":"2026-10-07"}'
-
-curl "http://mpf-valuation:8000/v1/valuation/latest" \
-  -H "X-API-Key: ${API_KEY}"
-```
-
-## Job model
-
-- Jobs are durable rows in `mpf.jobs`.
-- API enqueues and returns `202` with `job_id`.
-- Service workers claim jobs using `FOR UPDATE SKIP LOCKED`.
-- Poll status via service-specific `GET /v1/.../jobs/{job_id}` endpoints.
+- `GET /health` is public on each API container.
 
 ## Database ownership contracts
 
-All services connect to the same PostgreSQL database, with table write ownership split as follows:
+- Crawler-owned writes: `funds`, `fund_aliases`, `fund_scheme_memberships`, `fund_prices`, `jobs`
+- Portfolio-owned writes: `accounts`, `holdings_baselines`, `allocation_rules`, `contribution_plans`, `reconciliation_records`
+- Purchase-owned writes: `contribution_events`, `purchase_transactions`
+- Valuation-owned writes: `portfolio_snapshots`, `snapshot_fund_values`
+- Cross-service invalidation contract: `snapshot_invalidation_requests` (insert by crawler/portfolio/purchase, consume by valuation)
 
-- **Crawler-owned writes**: `mpf.funds`, `mpf.fund_aliases`, `mpf.fund_scheme_memberships`, `mpf.fund_prices`
-- **Portfolio-owned writes**: `mpf.accounts`, `mpf.holdings_baselines`, `mpf.allocation_rules`, `mpf.contribution_plans`, `mpf.reconciliation_records`
-- **Purchase-owned writes**: `mpf.contribution_events`, `mpf.purchase_transactions`
-- **Valuation-owned writes**: `mpf.portfolio_snapshots`, `mpf.snapshot_fund_values`
-- **Shared infrastructure tables**: `mpf.jobs`, `mpf.snapshot_invalidation_requests`
+## n8n workflows
 
-Services may read across ownership boundaries, but business-table writes are constrained by role grants in centralized SQL migrations.
+Importable examples are under [`n8n/workflows/`](./n8n/workflows/):
 
-## Database migrations
+1. Daily crawler sync
+2. Weekly crawler backfill
+3. Expected purchase processing
+4. Daily valuation snapshot
+5. On-demand valuation
 
-- SQL migrations are in [migrations/sql/](./migrations/sql/).
-- Migration runner: [scripts/migrate.py](./scripts/migrate.py)
-- `mpf-migrate` runs once before application services are treated as ready.
+n8n communicates via HTTP only.
 
-## Backups
-
-Backup:
-
-```bash
-mkdir -p data/backups
-docker compose exec -T mpf-db pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > "data/backups/mpf_$(date +%F_%H%M%S).sql"
-```
-
-Restore:
-
-```bash
-cat data/backups/<backup_file>.sql | docker compose exec -T mpf-db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}"
-```
-
-## Tests
+## Testing
 
 Unit tests:
 
@@ -199,35 +141,14 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -q
 ```
 
-Integration (one command, dockerized):
+Integration tests (dockerized, includes container-isolation assertions):
 
 ```bash
 .venv/bin/python -m pytest -m integration -q
 ```
 
-The integration suite starts/stops its own Compose project (`mpf-itest`), resets local PostgreSQL bind-mount data, and validates cross-service workflow behavior.
-It also verifies each service container excludes other services' source trees.
+## Known limitations / explicit caveats
 
-Unit test coverage includes:
-
-- HSBC fixture parser: 520 normalized rows (20 funds × 26 dates)
-- HSBC malformed/duplicate/invalid negative cases
-- Manulife fundslist fixture counts and special interest-fund handling
-- API auth/health contract checks
-
-## n8n sample workflows
-
-Importable examples are in [n8n/workflows/](./n8n/workflows/).  
-They are examples only and are **not** auto-installed anywhere.
-
-- [MPF-01-Daily-Prices.json](./n8n/workflows/MPF-01-Daily-Prices.json)
-- [MPF-02-Weekly-Backfill.json](./n8n/workflows/MPF-02-Weekly-Backfill.json)
-- [MPF-03-Expected-Purchases.json](./n8n/workflows/MPF-03-Expected-Purchases.json)
-- [MPF-04-Daily-Valuation.json](./n8n/workflows/MPF-04-Daily-Valuation.json)
-- [MPF-05-OnDemand-Valuation.json](./n8n/workflows/MPF-05-OnDemand-Valuation.json)
-
-## Known limitations / unverified items
-
-- Real Manulife `fundhistory` JSON schema is still unverified in this environment due access denial from source endpoint.
-- With `CRAWLER_USE_FIXTURES=true`, crawler imports supplied fixtures only (deterministic tests).
-- `fundhistory` backfill reports per-fund blocked/unverified failures when fixture or live payload is unavailable.
+- Real Manulife `fundhistory` schema remains unverified in this environment; worker reports blocked/unverified historical failures explicitly.
+- Crawler job execution is asynchronous and durable via `mpf.jobs`.
+- Purchase and valuation execute synchronously via HTTP endpoints and do not use `mpf.jobs`.

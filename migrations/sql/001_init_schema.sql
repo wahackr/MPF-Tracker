@@ -199,4 +199,4 @@ TO mpf_purchase;
 GRANT INSERT, UPDATE, DELETE ON mpf.portfolio_snapshots, mpf.snapshot_fund_values
 TO mpf_valuation;
 
-GRANT INSERT, UPDATE, DELETE ON mpf.jobs TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
+GRANT INSERT, UPDATE, DELETE ON mpf.jobs TO mpf_crawler;

@@ -1,0 +1,68 @@
+{
+  "name": "MPF-02 Weekly Backfill",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 30 7 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "cron-weekly-backfill",
+      "name": "Sunday 07:30 HKT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mpf-crawler:8000/v1/crawl/jobs/backfill",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"provider\":\"all\",\"from_date\":\"={{$now.minus({days: 14}).toFormat('yyyy-MM-dd')}}\",\"to_date\":\"={{$now.toFormat('yyyy-MM-dd')}}\",\"manulife_filter_days\":14}"
+      },
+      "id": "http-weekly-backfill",
+      "name": "Trigger crawler backfill",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Sunday 07:30 HKT": {
+      "main": [
+        [
+          {
+            "node": "Trigger crawler backfill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}
+

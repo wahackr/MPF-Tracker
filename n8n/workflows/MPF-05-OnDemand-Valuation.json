@@ -1,0 +1,85 @@
+{
+  "name": "MPF-05 On-demand Valuation",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "mpf/valuation/latest",
+        "httpMethod": "GET",
+        "responseMode": "responseNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://mpf-valuation:8000/v1/valuation/latest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.API_KEY}}"
+            }
+          ]
+        }
+      },
+      "id": "fetch-latest-valuation",
+      "name": "Fetch latest valuation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}"
+      },
+      "id": "return-response",
+      "name": "Return valuation response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook trigger": {
+      "main": [
+        [
+          {
+            "node": "Fetch latest valuation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch latest valuation": {
+      "main": [
+        [
+          {
+            "node": "Return valuation response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}
+

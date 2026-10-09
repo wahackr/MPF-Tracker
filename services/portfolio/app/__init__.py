@@ -1,0 +1,2 @@
+"""Portfolio FastAPI app package."""
+

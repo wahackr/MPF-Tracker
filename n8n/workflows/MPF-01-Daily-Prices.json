@@ -1,0 +1,68 @@
+{
+  "name": "MPF-01 Daily Prices",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-daily-prices",
+      "name": "Daily 07:00 HKT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://mpf-crawler:8000/v1/crawl/jobs/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"provider\":\"all\",\"rolling_days\":7}"
+      },
+      "id": "http-sync-prices",
+      "name": "Trigger crawler sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        560,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 07:00 HKT": {
+      "main": [
+        [
+          {
+            "node": "Trigger crawler sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}
+

@@ -1,0 +1,2 @@
+"""Purchase FastAPI app package."""
+

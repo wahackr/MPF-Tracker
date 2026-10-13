@@ -37,7 +37,8 @@ class ManulifePriceRecord:
     fund_name: str
     currency: str
     price_date: date
-    price: Decimal
+    bid: Decimal
+    offer: Decimal
 
 
 class ManulifeCrawlResult(TypedDict):
@@ -112,7 +113,8 @@ def crawl(*, from_date: date, to_date: date) -> ManulifeCrawlResult:
                         fund_name=fund.fund_name,
                         currency=fund.currency,
                         price_date=point.price_date,
-                        price=point.price,
+                        bid=point.price,
+                        offer=point.price,
                     )
                 )
 
@@ -272,22 +274,25 @@ def save_records(
             row = (
                 pg_connection.execute(
                     text("""
-                    INSERT INTO mpf.fund_prices (fund_id, price_date, price, source, fetched_at, updated_at)
-                    VALUES (:fund_id, :price_date, :price, 'manulife_fundhistory', NOW(), NOW())
+                    INSERT INTO mpf.fund_prices (fund_id, price_date, bid, offer, source, fetched_at, updated_at)
+                    VALUES (:fund_id, :price_date, :bid, :offer, 'manulife_fundhistory', NOW(), NOW())
                     ON CONFLICT (fund_id, price_date)
                     DO UPDATE
                     SET
-                        price = EXCLUDED.price,
+                        bid = EXCLUDED.bid,
+                        offer = EXCLUDED.offer,
                         source = EXCLUDED.source,
                         fetched_at = EXCLUDED.fetched_at,
                         updated_at = NOW()
-                    WHERE mpf.fund_prices.price IS DISTINCT FROM EXCLUDED.price
+                    WHERE mpf.fund_prices.bid IS DISTINCT FROM EXCLUDED.bid
+                    OR mpf.fund_prices.offer IS DISTINCT FROM EXCLUDED.offer
                     RETURNING (xmax = 0) AS inserted
                     """),
                     {
                         "fund_id": fund_id,
                         "price_date": record.price_date,
-                        "price": record.price,
+                        "bid": record.bid,
+                        "offer": record.offer,
                     },
                 )
                 .mappings()

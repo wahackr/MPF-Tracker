@@ -60,21 +60,13 @@ export async function loadLatestPrice(fundId: string, asOfDate: string): Promise
     `
     SELECT
       fp.price_date::text,
+      fp.bid::text AS price,
       CASE
-        WHEN f.provider = 'hsbc' THEN fp.bid
-        WHEN f.provider = 'manulife' THEN fp.price
-        ELSE COALESCE(fp.price, fp.bid, fp.offer)
-      END::text AS price,
-      CASE
-        WHEN f.provider = 'hsbc' THEN 'BID'
-        WHEN f.provider = 'manulife' THEN 'PRICE'
-        WHEN fp.price IS NOT NULL THEN 'PRICE'
         WHEN fp.bid IS NOT NULL THEN 'BID'
         WHEN fp.offer IS NOT NULL THEN 'OFFER'
         ELSE 'UNKNOWN'
       END AS price_type
     FROM mpf.fund_prices fp
-    JOIN mpf.funds f ON f.fund_id = fp.fund_id
     WHERE fp.fund_id = $1
       AND fp.price_date <= $2::date
     ORDER BY fp.price_date DESC

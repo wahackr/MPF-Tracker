@@ -39,7 +39,6 @@ CREATE TABLE IF NOT EXISTS mpf.fund_prices (
     price_date DATE NOT NULL,
     bid NUMERIC(24, 10),
     offer NUMERIC(24, 10),
-    price NUMERIC(24, 10),
     source TEXT NOT NULL,
     fetched_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -206,26 +205,26 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_as_of
 CREATE INDEX IF NOT EXISTS idx_snapshot_invalidation_requests_unprocessed
     ON mpf.snapshot_invalidation_requests(processed_at, created_at);
 
-GRANT USAGE ON SCHEMA mpf TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
-GRANT CONNECT ON DATABASE mpf TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
+GRANT USAGE ON SCHEMA mpf TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}}, {{VALUATION_DB_USER}};
+GRANT CONNECT ON DATABASE {{POSTGRES_DB}} TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}}, {{VALUATION_DB_USER}};
 
-GRANT SELECT ON ALL TABLES IN SCHEMA mpf TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
+GRANT SELECT ON ALL TABLES IN SCHEMA mpf TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}}, {{VALUATION_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.funds, mpf.fund_aliases, mpf.fund_scheme_memberships, mpf.fund_prices
-TO mpf_crawler;
+TO {{CRAWLER_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.accounts, mpf.holdings_baselines, mpf.allocation_rules, mpf.contribution_plans
-TO mpf_portfolio;
+TO {{PORTFOLIO_DB_USER}};
 
-GRANT INSERT, UPDATE, DELETE ON mpf.reconciliation_records TO mpf_portfolio;
+GRANT INSERT, UPDATE, DELETE ON mpf.reconciliation_records TO {{PORTFOLIO_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.contribution_events, mpf.purchase_transactions
-TO mpf_purchase;
+TO {{PURCHASE_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.portfolio_snapshots, mpf.snapshot_fund_values
-TO mpf_valuation;
+TO {{VALUATION_DB_USER}};
 
-GRANT INSERT, UPDATE, DELETE ON mpf.jobs TO mpf_crawler;
+GRANT INSERT, UPDATE, DELETE ON mpf.jobs TO {{CRAWLER_DB_USER}};
 
-GRANT INSERT ON mpf.snapshot_invalidation_requests TO mpf_crawler, mpf_portfolio, mpf_purchase;
-GRANT UPDATE, DELETE ON mpf.snapshot_invalidation_requests TO mpf_valuation;
+GRANT INSERT ON mpf.snapshot_invalidation_requests TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}};
+GRANT UPDATE, DELETE ON mpf.snapshot_invalidation_requests TO {{VALUATION_DB_USER}};

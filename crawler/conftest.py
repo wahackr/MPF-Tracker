@@ -19,6 +19,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = REPO_ROOT / ".env.example"
 COMPOSE_PROJECT = "mpf-itest"
 AUTOMATION_NETWORK = "automation"
+TEST_DB_USERS = {
+    "CRAWLER_DB_USER": "mpf_itest_crawler",
+    "PORTFOLIO_DB_USER": "mpf_itest_portfolio",
+    "PURCHASE_DB_USER": "mpf_itest_purchase",
+    "VALUATION_DB_USER": "mpf_itest_valuation",
+}
 
 
 @dataclass
@@ -225,6 +231,7 @@ def integration_harness() -> ComposeHarness:
     env["COMPOSE_PROJECT_NAME"] = COMPOSE_PROJECT
     env["POSTGRES_BIND_ADDRESS"] = "127.0.0.1"
     env["POSTGRES_HOST_PORT"] = "0"
+    env.update(TEST_DB_USERS)
 
     with tempfile.TemporaryDirectory(prefix="mpf-itest-") as temporary_dir:
         temporary_path = Path(temporary_dir)
@@ -256,7 +263,7 @@ def crawler_pg_engine(integration_harness: ComposeHarness) -> Engine:
     engine = create_engine(
         URL.create(
             "postgresql+psycopg",
-            username="mpf_crawler",
+            username=integration_harness.env["CRAWLER_DB_USER"],
             password="REPLACE_ME_CRAWLER_PASSWORD",
             host="127.0.0.1",
             port=integration_harness.published_port("mpf-db", 5432),

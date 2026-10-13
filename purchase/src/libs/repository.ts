@@ -89,14 +89,8 @@ export async function findPriceForEstimation(
 ): Promise<{ price_date: string; price: string } | null> {
   const rows = await client.query(
     `
-    SELECT fp.price_date,
-           CASE
-             WHEN f.provider = 'hsbc' THEN fp.bid
-             WHEN f.provider = 'manulife' THEN fp.price
-             ELSE COALESCE(fp.price, fp.bid, fp.offer)
-           END AS price
+    SELECT fp.price_date, fp.bid AS price
     FROM mpf.fund_prices fp
-    JOIN mpf.funds f ON f.fund_id = fp.fund_id
     WHERE fp.fund_id = $1
       AND fp.price_date >= $2::date
       AND fp.price_date <= ($2::date + ($3::int * INTERVAL '1 day'))::date

@@ -103,7 +103,8 @@ def _price_record(
         fund_name=fund_name,
         currency=currency,
         price_date=price_date,
-        price=Decimal(price),
+        bid=Decimal(price),
+        offer=Decimal(price),
     )
 
 
@@ -319,11 +320,29 @@ def test_crawl_fetches_history_for_every_fund_and_filters_prices(
 
     assert set(history_calls) == {"PYTEST_A", "PYTEST_B"}
     assert {
-        (record.fund_id, record.currency, record.price_date, record.price)
+        (
+            record.fund_id,
+            record.currency,
+            record.price_date,
+            record.bid,
+            record.offer,
+        )
         for record in result["records"]
     } == {
-        ("PYTEST_A", "HKD", date(2026, 10, 1), Decimal("10.1")),
-        ("PYTEST_B", "USD", date(2026, 10, 1), Decimal("10.1")),
+        (
+            "PYTEST_A",
+            "HKD",
+            date(2026, 10, 1),
+            Decimal("10.1"),
+            Decimal("10.1"),
+        ),
+        (
+            "PYTEST_B",
+            "USD",
+            date(2026, 10, 1),
+            Decimal("10.1"),
+            Decimal("10.1"),
+        ),
     }
     assert result["funds_failed"] == []
 
@@ -544,7 +563,7 @@ def test_save_records(manulife_pg_engine: Engine) -> None:
     with manulife_pg_engine.connect() as connection:
         stored_prices = connection.execute(
             text("""
-                SELECT price_date, price, source
+                SELECT price_date, bid, offer, source
                 FROM mpf.fund_prices
                 WHERE fund_id = 'MANULIFE:PYTEST_SAVE'
                 ORDER BY price_date
@@ -559,8 +578,18 @@ def test_save_records(manulife_pg_engine: Engine) -> None:
         "max_changed_date": date(2026, 10, 2),
     }
     assert stored_prices == [
-        (date(2026, 10, 1), Decimal("10.1000000000"), "manulife_fundhistory"),
-        (date(2026, 10, 2), Decimal("10.2000000000"), "manulife_fundhistory"),
+        (
+            date(2026, 10, 1),
+            Decimal("10.1000000000"),
+            Decimal("10.1000000000"),
+            "manulife_fundhistory",
+        ),
+        (
+            date(2026, 10, 2),
+            Decimal("10.2000000000"),
+            Decimal("10.2000000000"),
+            "manulife_fundhistory",
+        ),
     ]
 
 
@@ -584,14 +613,14 @@ def test_save_records_conflict(manulife_pg_engine: Engine) -> None:
     updated = manulife.save_records(manulife_pg_engine, [changed])
 
     with manulife_pg_engine.connect() as connection:
-        stored_price = connection.execute(
+        stored_prices = connection.execute(
             text("""
-                SELECT price
+                SELECT bid, offer
                 FROM mpf.fund_prices
                 WHERE fund_id = 'MANULIFE:PYTEST_SAVE_CONFLICT'
                   AND price_date = '2026-10-03'
                 """)
-        ).scalar_one()
+        ).one()
 
     assert inserted["inserted"] == 1
     assert unchanged == {
@@ -608,7 +637,10 @@ def test_save_records_conflict(manulife_pg_engine: Engine) -> None:
         "min_changed_date": date(2026, 10, 3),
         "max_changed_date": date(2026, 10, 3),
     }
-    assert stored_price == Decimal("21.1000000000")
+    assert stored_prices == (
+        Decimal("21.1000000000"),
+        Decimal("21.1000000000"),
+    )
 
 
 def test_crawl(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -670,10 +702,20 @@ def test_crawl(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert set(result["records"]) == {
         manulife.ManulifePriceRecord(
-            "PYTEST_A", "Fund A", "HKD", date(2026, 10, 1), Decimal("10.1")
+            "PYTEST_A",
+            "Fund A",
+            "HKD",
+            date(2026, 10, 1),
+            Decimal("10.1"),
+            Decimal("10.1"),
         ),
         manulife.ManulifePriceRecord(
-            "PYTEST_B", "Fund B", "USD", date(2026, 10, 7), Decimal("20.7")
+            "PYTEST_B",
+            "Fund B",
+            "USD",
+            date(2026, 10, 7),
+            Decimal("20.7"),
+            Decimal("20.7"),
         ),
     }
     assert result["funds_failed"] == []

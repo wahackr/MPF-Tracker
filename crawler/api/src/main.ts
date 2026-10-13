@@ -2,7 +2,7 @@ import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-import { query, withTransaction } from "./libs/db.js";
+import { query } from "./libs/db.js";
 import { enqueueCrawlerJob } from "./libs/jobs.js";
 
 const ProviderSchema = z.enum(["all", "hsbc", "manulife"]);
@@ -33,9 +33,7 @@ export function crawlerRouter(): Router {
     try {
       const payload = SyncSchema.parse(req.body ?? {});
       const idempotencyKey = req.header("Idempotency-Key") ?? randomUUID();
-      const result = await withTransaction((client) =>
-        enqueueCrawlerJob((sql, params) => client.query(sql, params), "sync", payload, idempotencyKey)
-      );
+      const result = await enqueueCrawlerJob("sync", payload, idempotencyKey);
       res.status(202).json(result);
     } catch (error) {
       next(error);
@@ -52,9 +50,7 @@ export function crawlerRouter(): Router {
         return;
       }
       const idempotencyKey = req.header("Idempotency-Key") ?? randomUUID();
-      const result = await withTransaction((client) =>
-        enqueueCrawlerJob((sql, params) => client.query(sql, params), "backfill", payload, idempotencyKey)
-      );
+      const result = await enqueueCrawlerJob("backfill", payload, idempotencyKey);
       res.status(202).json(result);
     } catch (error) {
       next(error);
@@ -107,7 +103,7 @@ export function crawlerRouter(): Router {
       const toDate = typeof req.query.to_date === "string" ? req.query.to_date : null;
       const rows = await query(
         `
-        SELECT fund_id, price_date, bid, offer, price, source, fetched_at, updated_at
+        SELECT fund_id, price_date, bid, offer, source, fetched_at, updated_at
         FROM mpf.fund_prices
         WHERE fund_id = $1
           AND ($2::date IS NULL OR price_date >= $2::date)

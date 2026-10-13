@@ -53,8 +53,8 @@ services:
       context: .
       dockerfile: crawler/api/Dockerfile
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "${API_BIND_ADDRESS:-0.0.0.0}:${CRAWLER_API_HOST_PORT:-8001}:8000"
     environment:
       API_KEY: ${API_KEY}
       DB_HOST: ${POSTGRES_HOST}
@@ -113,8 +113,8 @@ services:
       context: .
       dockerfile: portfolio/Dockerfile
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "${API_BIND_ADDRESS:-0.0.0.0}:${PORTFOLIO_API_HOST_PORT:-8002}:8000"
     environment:
       API_KEY: ${API_KEY}
       DB_HOST: ${POSTGRES_HOST}
@@ -144,8 +144,8 @@ services:
       context: .
       dockerfile: purchase/Dockerfile
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "${API_BIND_ADDRESS:-0.0.0.0}:${PURCHASE_API_HOST_PORT:-8003}:8000"
     environment:
       API_KEY: ${API_KEY}
       DB_HOST: ${POSTGRES_HOST}
@@ -175,8 +175,8 @@ services:
       context: .
       dockerfile: valuation/Dockerfile
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "${API_BIND_ADDRESS:-0.0.0.0}:${VALUATION_API_HOST_PORT:-8004}:8000"
     environment:
       API_KEY: ${API_KEY}
       DB_HOST: ${POSTGRES_HOST}

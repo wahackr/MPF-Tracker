@@ -17,7 +17,7 @@ from src import main as worker_main
 CONFIG = {
     "WORKER_POLL_INTERVAL_SECONDS": 0.001,
     "WORKER_LEASE_SECONDS": 90,
-    "WORKER_HEARTBEAT_SECONDS": 0.001,
+    "WORKER_HEARTBEAT_SECONDS": 60.0,
 }
 
 
@@ -32,9 +32,18 @@ def claimed_job(job_type: str = "sync", attempts: int = 1):
 
 
 def test_process_next_job_returns_false_when_queue_is_empty(monkeypatch) -> None:
-    monkeypatch.setattr(worker_main, "claim_next_crawler_job", lambda *_args, **_kwargs: None)
+    claim_calls: list[tuple] = []
+    engine = object()
+    monkeypatch.setattr(
+        worker_main,
+        "claim_next_crawler_job",
+        lambda received_engine, **kwargs: claim_calls.append(
+            (received_engine, kwargs)
+        ),
+    )
 
-    assert worker_main.process_next_job(CONFIG, object()) is False
+    assert worker_main.process_next_job(CONFIG, engine) is False
+    assert claim_calls == [(engine, {"lease_seconds": 90})]
 
 
 def test_process_next_job_completes_successful_claim(monkeypatch) -> None:
@@ -107,14 +116,47 @@ def test_process_next_job_records_handler_failure(monkeypatch) -> None:
     ]
 
 
+def test_process_next_job_records_unknown_job_type(monkeypatch) -> None:
+    job = claimed_job(job_type="unknown")
+    failures: list[dict] = []
+    monkeypatch.setattr(worker_main, "claim_next_crawler_job", lambda *_args, **_kwargs: job)
+    monkeypatch.setattr(
+        worker_main,
+        "complete_claimed_job",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("completion must not run")
+        ),
+    )
+    monkeypatch.setattr(
+        worker_main,
+        "fail_claimed_job",
+        lambda _engine, **kwargs: failures.append(kwargs) or True,
+    )
+
+    assert worker_main.process_next_job(CONFIG, object()) is True
+    assert failures == [
+        {
+            "job_id": job["job_id"],
+            "attempts": 1,
+            "error_message": "No handler registered for job_type=unknown",
+        }
+    ]
+
+
 def test_process_next_job_heartbeats_during_long_handler(monkeypatch) -> None:
     job = claimed_job()
     heartbeat_seen = Event()
+    heartbeat_calls: list[tuple] = []
+    engine = object()
     monkeypatch.setattr(worker_main, "claim_next_crawler_job", lambda *_args, **_kwargs: job)
     monkeypatch.setattr(
         worker_main,
         "heartbeat_claim",
-        lambda *_args, **_kwargs: heartbeat_seen.set() or True,
+        lambda received_engine, **kwargs: heartbeat_calls.append(
+            (received_engine, kwargs)
+        )
+        or heartbeat_seen.set()
+        or True,
     )
 
     def wait_for_heartbeat(_config, _engine, _request):
@@ -124,8 +166,19 @@ def test_process_next_job_heartbeats_during_long_handler(monkeypatch) -> None:
     monkeypatch.setitem(worker_main.handlers, "sync", wait_for_heartbeat)
     monkeypatch.setattr(worker_main, "complete_claimed_job", lambda *_args, **_kwargs: True)
 
-    assert worker_main.process_next_job(CONFIG, object()) is True
+    heartbeat_config = {**CONFIG, "WORKER_HEARTBEAT_SECONDS": 0.001}
+    assert worker_main.process_next_job(heartbeat_config, engine) is True
     assert heartbeat_seen.is_set()
+    assert heartbeat_calls == [
+        (
+            engine,
+            {
+                "job_id": job["job_id"],
+                "attempts": 1,
+                "lease_seconds": 90,
+            },
+        )
+    ]
 
 
 def test_main_polls_until_stop_and_disposes_engine(monkeypatch) -> None:
@@ -145,6 +198,29 @@ def test_main_polls_until_stop_and_disposes_engine(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(worker_main, "process_next_job", process_once)
+
+    worker_main.main(CONFIG, stop_event=stop)
+
+    assert engine.disposed is True
+
+
+def test_main_recovers_from_processing_error_and_disposes_engine(monkeypatch) -> None:
+    stop = Event()
+
+    class FakeEngine:
+        disposed = False
+
+        def dispose(self):
+            self.disposed = True
+
+    engine = FakeEngine()
+    monkeypatch.setattr(worker_main, "get_engine", lambda _config: engine)
+
+    def fail_once(_config, _engine):
+        stop.set()
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(worker_main, "process_next_job", fail_once)
 
     worker_main.main(CONFIG, stop_event=stop)
 

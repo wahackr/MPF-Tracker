@@ -194,9 +194,7 @@ def parse_all_funds_csv(payload: str) -> list[HsbcPriceRecord]:
         data_columns = row[2:]
 
         if price_type not in {"bid", "offer"}:
-            raise ParseError(
-                f"HSBC price rows must be BID/OFFER at date {price_date}"
-            )
+            raise ParseError(f"HSBC price rows must be BID/OFFER at date {price_date}")
 
         pair = (price_date, price_type)
         if pair in seen_pairs:
@@ -207,9 +205,7 @@ def parse_all_funds_csv(payload: str) -> list[HsbcPriceRecord]:
                 raise ParseError(
                     f"HSBC duplicate header pair for {price_date} {price_type}"
                 )
-            raise ParseError(
-                f"HSBC price rows must be BID/OFFER at date {price_date}"
-            )
+            raise ParseError(f"HSBC price rows must be BID/OFFER at date {price_date}")
         seen_pairs.add(pair)
 
         for index, fund_name in enumerate(fund_names):

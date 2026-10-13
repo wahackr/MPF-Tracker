@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine, URL
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = REPO_ROOT / ".env.example"
 COMPOSE_PROJECT = "mpf-itest"
 AUTOMATION_NETWORK = "automation"
@@ -143,6 +145,11 @@ except urllib.error.HTTPError as error:
         )
         return result.stdout.strip()
 
+    def published_port(self, service: str, container_port: int) -> int:
+        result = self.compose(["port", service, str(container_port)])
+        address = result.stdout.strip().splitlines()[0]
+        return int(address.rsplit(":", 1)[1])
+
 
 def _ensure_docker_available() -> None:
     if shutil.which("docker") is None:
@@ -225,6 +232,8 @@ def integration_harness() -> ComposeHarness:
             "  mpf-db:\n"
             "    volumes:\n"
             "      - postgres-test-data:/var/lib/postgresql/data\n"
+            "    ports:\n"
+            "      - '127.0.0.1::5432'\n"
             "networks:\n"
             "  mpf-internal:\n"
             "    name: mpf-itest-internal\n"
@@ -240,3 +249,22 @@ def integration_harness() -> ComposeHarness:
             yield harness
         finally:
             harness.compose(["down", "--volumes"], check=False)
+
+
+@pytest.fixture(scope="session")
+def crawler_pg_engine(integration_harness: ComposeHarness) -> Engine:
+    engine = create_engine(
+        URL.create(
+            "postgresql+psycopg",
+            username="mpf_crawler",
+            password="REPLACE_ME_CRAWLER_PASSWORD",
+            host="127.0.0.1",
+            port=integration_harness.published_port("mpf-db", 5432),
+            database="mpf",
+        ),
+        pool_pre_ping=True,
+    )
+    try:
+        yield engine
+    finally:
+        engine.dispose()

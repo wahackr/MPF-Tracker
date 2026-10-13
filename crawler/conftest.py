@@ -223,6 +223,8 @@ def integration_harness() -> ComposeHarness:
 
     env = os.environ.copy()
     env["COMPOSE_PROJECT_NAME"] = COMPOSE_PROJECT
+    env["POSTGRES_BIND_ADDRESS"] = "127.0.0.1"
+    env["POSTGRES_HOST_PORT"] = "0"
 
     with tempfile.TemporaryDirectory(prefix="mpf-itest-") as temporary_dir:
         temporary_path = Path(temporary_dir)
@@ -232,8 +234,6 @@ def integration_harness() -> ComposeHarness:
             "  mpf-db:\n"
             "    volumes:\n"
             "      - postgres-test-data:/var/lib/postgresql/data\n"
-            "    ports:\n"
-            "      - '127.0.0.1::5432'\n"
             "networks:\n"
             "  mpf-internal:\n"
             "    name: mpf-itest-internal\n"

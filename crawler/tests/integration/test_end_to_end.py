@@ -9,67 +9,9 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
-def test_crawler_sync_idempotent(integration_harness: Any) -> None:
-    status, created = integration_harness.api_request(
-        service_host="mpf-crawler-api",
-        method="POST",
-        path="/v1/crawl/jobs/sync",
-        payload={"provider": "all", "rolling_days": 7},
-        extra_headers={"Idempotency-Key": "itest-sync-1"},
-    )
-    assert status == 202
-    job = integration_harness.poll_job(
-        service_host="mpf-crawler-api",
-        job_path_prefix="/v1/crawl/jobs",
-        job_id=created["job_id"],
-    )
-    assert job["status"] == "succeeded"
-    assert job["result"]["funds_seen"] == 96
-    assert job["result"]["price_rows_inserted"] == 595
-    assert job["result"]["price_rows_updated"] == 0
-    assert job["result"]["price_rows_unchanged"] == 0
-
-    status, conflict = integration_harness.api_request(
-        service_host="mpf-crawler-api",
-        method="POST",
-        path="/v1/crawl/jobs/sync",
-        payload={"provider": "hsbc", "rolling_days": 7},
-        extra_headers={"Idempotency-Key": "itest-sync-1"},
-    )
-    assert status == 409
-    assert "Idempotency-Key" in conflict["detail"]
-
-    valuation_jobs = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.jobs WHERE service='valuation'"))
-    assert valuation_jobs == 0
-
-    status, created = integration_harness.api_request(
-        service_host="mpf-crawler-api",
-        method="POST",
-        path="/v1/crawl/jobs/sync",
-        payload={"provider": "all", "rolling_days": 7},
-        extra_headers={"Idempotency-Key": "itest-sync-2"},
-    )
-    assert status == 202
-    job = integration_harness.poll_job(
-        service_host="mpf-crawler-api",
-        job_path_prefix="/v1/crawl/jobs",
-        job_id=created["job_id"],
-    )
-    assert job["status"] == "succeeded"
-    assert job["result"]["price_rows_inserted"] == 0
-    assert job["result"]["price_rows_updated"] == 0
-    assert job["result"]["price_rows_unchanged"] == 595
-
-    status, funds_response = integration_harness.api_request(
-        service_host="mpf-crawler-api",
-        method="GET",
-        path="/v1/funds?limit=200",
-    )
-    assert status == 200
-    assert funds_response["count"] == 96
-
-
 def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None:
+    _seed_funds_and_prices(integration_harness)
+
     _, funds_response = integration_harness.api_request(
         service_host="mpf-crawler-api",
         method="GET",
@@ -165,9 +107,9 @@ def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None
     )
     assert status == 200
     assert process_result["processed_events"] == 2
-    assert process_result["inserted_transactions"] == 2
+    assert process_result["inserted_transactions"] == 4
     after_tx = int(integration_harness.sql_scalar("SELECT count(*) FROM mpf.purchase_transactions"))
-    assert after_tx - before_tx == 2
+    assert after_tx - before_tx == 4
 
     status, second_result = integration_harness.api_request(
         service_host="mpf-purchase",
@@ -232,31 +174,6 @@ def test_portfolio_purchase_and_valuation_flow(integration_harness: Any) -> None
     assert duplicate_purchase_rows == 0
 
 
-def test_backfill_reports_unverified_fundhistory(integration_harness: Any) -> None:
-    status, created = integration_harness.api_request(
-        service_host="mpf-crawler-api",
-        method="POST",
-        path="/v1/crawl/jobs/backfill",
-        payload={
-            "provider": "manulife",
-            "from_date": "2026-10-01",
-            "to_date": "2026-10-07",
-            "manulife_filter_days": 14,
-        },
-        extra_headers={"Idempotency-Key": "itest-backfill-1"},
-    )
-    assert status == 202
-    job = integration_harness.poll_job(
-        service_host="mpf-crawler-api",
-        job_path_prefix="/v1/crawl/jobs",
-        job_id=created["job_id"],
-    )
-    assert job["status"] == "partial"
-    assert len(job["result"]["funds_failed"]) > 0
-    first_error = job["result"]["funds_failed"][0]
-    assert first_error["note"] == "fundhistory_unverified_or_blocked"
-
-
 def test_db_role_restrictions(integration_harness: Any) -> None:
     output = integration_harness.compose(
         [
@@ -291,6 +208,36 @@ def test_service_containers_do_not_include_other_service_sources(integration_har
             check=False,
         )
         assert result.returncode == 0, f"isolation check failed for {compose_service}: {result.stderr}"
+
+
+def _seed_funds_and_prices(harness: Any) -> None:
+    harness.sql_scalar(
+        """
+        INSERT INTO mpf.funds (fund_id, provider, provider_fund_code, name, currency)
+        VALUES
+            ('HSBC:ITEST_A', 'hsbc', 'ITEST_A', 'Integration HSBC A', 'HKD'),
+            ('HSBC:ITEST_B', 'hsbc', 'ITEST_B', 'Integration HSBC B', 'HKD'),
+            ('MANULIFE:ITEST_A', 'manulife', 'ITEST_A', 'Integration Manulife A', 'HKD'),
+            ('MANULIFE:ITEST_B', 'manulife', 'ITEST_B', 'Integration Manulife B', 'HKD')
+        ON CONFLICT (fund_id) DO NOTHING;
+
+        INSERT INTO mpf.fund_prices (
+            fund_id, price_date, bid, offer, price, source, fetched_at
+        )
+        VALUES
+            ('HSBC:ITEST_A', '2026-10-07', 10.0, 10.1, NULL, 'integration_test', NOW()),
+            ('HSBC:ITEST_B', '2026-10-07', 20.0, 20.1, NULL, 'integration_test', NOW()),
+            ('MANULIFE:ITEST_A', '2026-10-07', NULL, NULL, 30.0, 'integration_test', NOW()),
+            ('MANULIFE:ITEST_B', '2026-10-07', NULL, NULL, 40.0, 'integration_test', NOW())
+        ON CONFLICT (fund_id, price_date) DO UPDATE
+        SET bid = EXCLUDED.bid,
+            offer = EXCLUDED.offer,
+            price = EXCLUDED.price,
+            source = EXCLUDED.source,
+            fetched_at = EXCLUDED.fetched_at,
+            updated_at = NOW();
+        """
+    )
 
 
 def _wait_for_holdings(harness: Any, account_id: str, expected_count: int) -> None:

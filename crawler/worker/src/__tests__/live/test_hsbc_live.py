@@ -5,8 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.libs.hsbc import fetch_hsbc_all_funds_csv
-from src.libs.parsers import parse_hsbc_all_funds_csv
+from src.libs.crawlers.hsbc import fetch_all_funds_csv, parse_all_funds_csv
 
 
 pytestmark = pytest.mark.live
@@ -16,10 +15,10 @@ def test_live_hsbc_csv_fetch_and_parse_recent_window(live_fetch_options: dict[st
     to_date = datetime.now(tz=ZoneInfo("Asia/Hong_Kong")).date()
     from_date = to_date - timedelta(days=7)
 
-    result = fetch_hsbc_all_funds_csv(
+    result = fetch_all_funds_csv(
         from_date=from_date, to_date=to_date, **live_fetch_options
     )
-    records = parse_hsbc_all_funds_csv(result["payload"])
+    records = parse_all_funds_csv(result["payload"])
 
     assert result["status_code"] == 200
     assert records, "Expected non-empty HSBC records from live API"

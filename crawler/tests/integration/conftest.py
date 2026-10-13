@@ -53,7 +53,6 @@ class ComposeHarness:
         method: str,
         path: str,
         payload: dict[str, Any] | None = None,
-        extra_headers: dict[str, str] | None = None,
     ) -> tuple[int, Any]:
         script = r"""
 import json, os, urllib.request, urllib.error
@@ -64,9 +63,6 @@ path = os.environ["TARGET_PATH"]
 api_key = os.environ["TARGET_API_KEY"]
 payload_text = os.environ.get("TARGET_PAYLOAD")
 headers = {"X-API-Key": api_key}
-extra_headers = os.environ.get("TARGET_EXTRA_HEADERS")
-if extra_headers:
-    headers.update(json.loads(extra_headers))
 data = None
 if payload_text:
     headers["Content-Type"] = "application/json"
@@ -99,8 +95,6 @@ except urllib.error.HTTPError as error:
         ]
         if payload is not None:
             exec_env_args.extend(["-e", f"TARGET_PAYLOAD={json.dumps(payload)}"])
-        if extra_headers:
-            exec_env_args.extend(["-e", f"TARGET_EXTRA_HEADERS={json.dumps(extra_headers)}"])
 
         cmd = [
             "docker",
@@ -131,26 +125,6 @@ except urllib.error.HTTPError as error:
         )
         parsed = json.loads(result.stdout.strip())
         return parsed["status"], parsed["body"]
-
-    def poll_job(
-        self,
-        *,
-        service_host: str,
-        job_path_prefix: str,
-        job_id: str,
-        timeout_seconds: int = 120,
-    ) -> dict[str, Any]:
-        deadline = time.time() + timeout_seconds
-        while time.time() < deadline:
-            _, body = self.api_request(
-                service_host=service_host,
-                method="GET",
-                path=f"{job_path_prefix}/{job_id}",
-            )
-            if body["status"] in ("succeeded", "partial", "failed"):
-                return body
-            time.sleep(1)
-        raise TimeoutError(f"Timed out polling job {job_id} on {service_host}")
 
     def sql_scalar(self, query: str) -> str:
         result = self.compose(
@@ -245,24 +219,24 @@ def integration_harness() -> ComposeHarness:
 
     with tempfile.TemporaryDirectory(prefix="mpf-itest-") as temporary_dir:
         temporary_path = Path(temporary_dir)
-        postgres_path = temporary_path / "postgres"
-        postgres_path.mkdir()
         override_file = temporary_path / "compose.override.yaml"
         override_file.write_text(
             "services:\n"
             "  mpf-db:\n"
             "    volumes:\n"
-            f"      - {postgres_path}:/var/lib/postgresql/data\n"
+            "      - postgres-test-data:/var/lib/postgresql/data\n"
             "networks:\n"
             "  mpf-internal:\n"
-            "    name: mpf-itest-internal\n",
+            "    name: mpf-itest-internal\n"
+            "volumes:\n"
+            "  postgres-test-data:\n",
             encoding="utf-8",
         )
         harness = ComposeHarness(repo_root=REPO_ROOT, env=env, override_file=override_file)
-        harness.compose(["down"], check=False)
+        harness.compose(["down", "--volumes"], check=False)
         try:
             harness.compose(["up", "-d", "--build"])
             _wait_for_health(harness)
             yield harness
         finally:
-            harness.compose(["down"], check=False)
+            harness.compose(["down", "--volumes"], check=False)

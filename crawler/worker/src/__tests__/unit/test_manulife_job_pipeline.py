@@ -17,7 +17,6 @@ if str(WORKER_SRC_DIR) not in sys.path:
 from libs import http_client, jobs
 from libs.crawlers import manulife
 from libs.crawlers.manulife import (
-    FundHistoryPoint,
     ManulifePriceRecord,
     ParseError,
     parse_manulife_fundhistory,
@@ -423,6 +422,26 @@ def test_sync_defaults_to_seven_day_window(monkeypatch: pytest.MonkeyPatch) -> N
     jobs.process_sync_job(CONFIG, object(), {"provider": "manulife"})
 
     assert (seen["to_date"] - seen["from_date"]).days == 6
+
+
+@pytest.mark.parametrize("rolling_days", [0, 29])
+def test_sync_rejects_invalid_rolling_days(rolling_days: int) -> None:
+    with pytest.raises(ValueError, match="rolling_days must be between 1 and 28"):
+        jobs.process_sync_job(
+            CONFIG,
+            object(),
+            {"provider": "manulife", "rolling_days": rolling_days},
+        )
+
+
+def test_run_job_rejects_invalid_provider() -> None:
+    with pytest.raises(ValueError, match="provider must be one of"):
+        jobs.run_job(
+            provider="invalid",
+            from_date=date(2026, 10, 1),
+            to_date=date(2026, 10, 7),
+            pg_engine=object(),
+        )
 
 
 def test_history_parse_failure_is_reported_per_fund(

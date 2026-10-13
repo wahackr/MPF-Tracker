@@ -62,13 +62,13 @@ export async function loadLatestPrice(fundId: string, asOfDate: string): Promise
       fp.price_date::text,
       CASE
         WHEN f.provider = 'hsbc' THEN fp.bid
-        WHEN f.provider = 'manulife' THEN fp.nav
-        ELSE COALESCE(fp.nav, fp.bid, fp.offer)
+        WHEN f.provider = 'manulife' THEN fp.price
+        ELSE COALESCE(fp.price, fp.bid, fp.offer)
       END::text AS price,
       CASE
         WHEN f.provider = 'hsbc' THEN 'BID'
-        WHEN f.provider = 'manulife' THEN 'NAV'
-        WHEN fp.nav IS NOT NULL THEN 'NAV'
+        WHEN f.provider = 'manulife' THEN 'PRICE'
+        WHEN fp.price IS NOT NULL THEN 'PRICE'
         WHEN fp.bid IS NOT NULL THEN 'BID'
         WHEN fp.offer IS NOT NULL THEN 'OFFER'
         ELSE 'UNKNOWN'

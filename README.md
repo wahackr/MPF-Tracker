@@ -65,9 +65,7 @@ There is no shared application-code directory. Modules are coupled only via Post
 
 See [`.env.example`](./.env.example).
 
-- `CRAWLER_USE_FIXTURES=false` by default (live crawling by default)
-- Set `CRAWLER_USE_FIXTURES=true` explicitly for local deterministic tests/dev
-- Optional `CRAWLER_FIXTURE_DIR` can override fixture path (auto-detects container/local defaults otherwise)
+- Provider tests mock `httpx.Client.request` with saved response files in `mpf-codex-handoff/fixtures`.
 - `WORKER_POLL_INTERVAL_SECONDS`, `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` control crawler worker leasing
 
 ## API overview
@@ -128,7 +126,7 @@ All `/v1/*` routes require `X-API-Key`.
 Importable examples are under [`n8n/workflows/`](./n8n/workflows/):
 
 1. Daily crawler sync
-2. Manual HSBC backfill for recovery (Manulife history requires a verified source schema)
+2. Manual HSBC backfill for recovery (Manulife history has a verified `SHK122` sample but still needs broader live validation)
 3. Expected purchase processing
 4. Daily valuation snapshot
 5. On-demand valuation
@@ -165,6 +163,6 @@ Run one provider at a time with `MPF_RUN_LIVE_TESTS=1 .venv/bin/python -m pytest
 
 ## Known limitations / explicit caveats
 
-- Real Manulife `fundhistory` schema remains unverified in this environment; worker reports blocked/unverified historical failures explicitly.
+- A real Manulife `fundhistory` response for `SHK122` was verified on 2026-10-12; other fund IDs and production backfill remain unverified. The worker reports per-fund fetch and parse failures.
 - Crawler job execution is asynchronous and durable via `mpf.jobs`.
 - Purchase and valuation execute synchronously via HTTP endpoints and do not use `mpf.jobs`.

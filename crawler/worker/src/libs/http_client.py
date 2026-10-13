@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from typing import Any, TypedDict
 
 import httpx
@@ -42,16 +41,3 @@ def request_with_retry(
             if attempt < retries:
                 time.sleep(backoff_seconds * attempt)
     raise ProviderHttpError(f"Request failed after retries: {method} {url}: {last_error}")
-
-
-def read_fixture(*, fixture_dir: Path | None, filename: str, required: bool = True) -> str | None:
-    if not fixture_dir:
-        if required:
-            raise ProviderHttpError("Fixture mode enabled but fixture_dir is not configured")
-        return None
-    file_path = fixture_dir / filename
-    if not file_path.exists():
-        if required:
-            raise ProviderHttpError(f"Fixture not found: {file_path}")
-        return None
-    return file_path.read_text(encoding="utf-8")

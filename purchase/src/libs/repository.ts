@@ -92,8 +92,8 @@ export async function findPriceForEstimation(
     SELECT fp.price_date,
            CASE
              WHEN f.provider = 'hsbc' THEN fp.bid
-             WHEN f.provider = 'manulife' THEN fp.nav
-             ELSE COALESCE(fp.nav, fp.bid, fp.offer)
+             WHEN f.provider = 'manulife' THEN fp.price
+             ELSE COALESCE(fp.price, fp.bid, fp.offer)
            END AS price
     FROM mpf.fund_prices fp
     JOIN mpf.funds f ON f.fund_id = fp.fund_id

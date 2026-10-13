@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -13,8 +12,6 @@ class Settings:
     db_name: str
     db_user: str
     db_password: str
-    crawler_use_fixtures: bool
-    crawler_fixture_dir: Path
     worker_poll_interval_seconds: float
     worker_lease_seconds: int
     worker_heartbeat_seconds: float
@@ -25,13 +22,6 @@ class Settings:
             f"postgresql+psycopg://{self.db_user}:{self.db_password}"
             f"@{self.db_host}:{self.db_port}/{self.db_name}"
         )
-
-
-def _bool_env(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _float_env(name: str, default: float) -> float:
@@ -48,27 +38,6 @@ def _int_env(name: str, default: int) -> int:
     return int(raw)
 
 
-def _path_env(name: str, default: Path) -> Path:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return default
-    return Path(raw).expanduser()
-
-
-def _default_fixture_dir() -> Path:
-    container_path = Path("/app/mpf-codex-handoff/fixtures")
-    if container_path.exists():
-        return container_path
-
-    resolved_file = Path(__file__).resolve()
-    for candidate_root in resolved_file.parents:
-        candidate = candidate_root / "mpf-codex-handoff" / "fixtures"
-        if candidate.exists():
-            return candidate
-
-    return container_path
-
-
 @lru_cache
 def get_settings() -> Settings:
     return Settings(
@@ -77,8 +46,6 @@ def get_settings() -> Settings:
         db_name=os.getenv("DB_NAME", "mpf"),
         db_user=os.getenv("DB_USER", "mpf_crawler"),
         db_password=os.getenv("DB_PASSWORD", "REPLACE_ME_CRAWLER_PASSWORD"),
-        crawler_use_fixtures=_bool_env("CRAWLER_USE_FIXTURES", False),
-        crawler_fixture_dir=_path_env("CRAWLER_FIXTURE_DIR", _default_fixture_dir()),
         worker_poll_interval_seconds=_float_env("WORKER_POLL_INTERVAL_SECONDS", 2.0),
         worker_lease_seconds=_int_env("WORKER_LEASE_SECONDS", 90),
         worker_heartbeat_seconds=_float_env("WORKER_HEARTBEAT_SECONDS", 15.0),

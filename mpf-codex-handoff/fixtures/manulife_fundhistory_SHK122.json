@@ -1,0 +1,36 @@
+{
+  "fundId": "SHK122",
+  "locale": "en_HK",
+  "productLine": "mpf",
+  "minDate": "2000-12-01",
+  "maxDate": "2026-10-08",
+  "priceHistory": [
+    {
+      "price": 10.0,
+      "offerPrice": 0.0,
+      "offer3Price": 0.0,
+      "offer5Price": 0.0,
+      "asOfDate": "2000-12-01",
+      "fundSuspendInd": "N",
+      "purchasePrice": 0.0
+    },
+    {
+      "price": 17.251,
+      "offerPrice": 0.0,
+      "offer3Price": 0.0,
+      "offer5Price": 0.0,
+      "asOfDate": "2026-10-07",
+      "fundSuspendInd": "N",
+      "purchasePrice": 0.0
+    },
+    {
+      "price": 17.195,
+      "offerPrice": 0.0,
+      "offer3Price": 0.0,
+      "offer5Price": 0.0,
+      "asOfDate": "2026-10-08",
+      "fundSuspendInd": "N",
+      "purchasePrice": 0.0
+    }
+  ]
+}

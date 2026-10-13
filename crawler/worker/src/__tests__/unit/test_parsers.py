@@ -11,12 +11,11 @@ WORKER_SRC_DIR = REPO_ROOT / "crawler" / "worker"
 if str(WORKER_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(WORKER_SRC_DIR))
 
-from src.libs.parsers import (  # type: ignore[import-not-found]
-    ParseError,
-    parse_hsbc_all_funds_csv,
+from src.libs.crawlers.manulife import (  # type: ignore[import-not-found]
     parse_manulife_fundhistory,
     parse_manulife_fundslist,
 )
+from src.libs.crawlers.hsbc import ParseError, parse_all_funds_csv  # type: ignore[import-not-found]
 
 
 FIXTURES_DIR = REPO_ROOT / "mpf-codex-handoff" / "fixtures"
@@ -24,7 +23,7 @@ FIXTURES_DIR = REPO_ROOT / "mpf-codex-handoff" / "fixtures"
 
 def test_hsbc_parser_unpivots_fixture_to_expected_count() -> None:
     payload = (FIXTURES_DIR / "hsbc_all_supertrust_20260901_20261007.csv").read_text(encoding="utf-8")
-    records = parse_hsbc_all_funds_csv(payload)
+    records = parse_all_funds_csv(payload)
     assert len(records) == 520
     assert len({item.fund_name for item in records}) == 20
     assert len({item.price_date for item in records}) == 26
@@ -59,49 +58,40 @@ def test_hsbc_parser_unpivots_fixture_to_expected_count() -> None:
 )
 def test_hsbc_parser_negative_cases(payload: str, expected_message: str) -> None:
     with pytest.raises(ParseError) as exc:
-        parse_hsbc_all_funds_csv(payload)
+        parse_all_funds_csv(payload)
     assert expected_message in str(exc.value)
 
 
-def test_manulife_fundslist_parser_counts_and_special_interest_fund() -> None:
+def test_manulife_fundslist_parser_extracts_fund_identity() -> None:
     payload = (FIXTURES_DIR / "manulife_fundslist.json").read_text(encoding="utf-8")
     records = parse_manulife_fundslist(payload)
     assert len(records) == 76
 
-    product_8 = sum(1 for record in records if record.products_id == ["8"])
-    product_22 = sum(1 for record in records if record.products_id == ["22"])
-    assert product_8 == 31
-    assert product_22 == 45
-
-    nav_positive = sum(1 for record in records if record.nav_price and record.nav_price > 0)
-    assert nav_positive == 75
-
-    interest_record = next(record for record in records if record.fund_id == "DHK121")
-    assert interest_record.nav_price == 0
-    assert interest_record.interest_fund_flag is True
+    fund = next(record for record in records if record.fund_id == "DIS148")
+    assert fund.fund_name == "Manulife MPF Core Accumulation Fund ##"
+    assert fund.currency == "HKD"
 
 
-def test_manulife_display_frontend_and_as_of_dates_preserved() -> None:
-    payload = (FIXTURES_DIR / "manulife_fundslist.json").read_text(encoding="utf-8")
-    records = parse_manulife_fundslist(payload)
-    assert any(record.display_frontend is True for record in records)
-    assert any(record.display_frontend is False for record in records)
-    assert any(record.nav_as_of_date is not None for record in records)
+def test_manulife_fundslist_defaults_missing_currency_to_hkd() -> None:
+    records = parse_manulife_fundslist(
+        '[{"fundId":"SHK122","fundName":"Stable Fund"}]'
+    )
+    assert records[0].currency == "HKD"
 
 
-def test_manulife_fundhistory_parser_handles_known_shape() -> None:
-    known_shape_payload = json.dumps(
+def test_manulife_fundhistory_parser_handles_price_history() -> None:
+    payload = json.dumps(
         {
-            "history": [
-                {"date": "2026-10-01", "price": "17.1"},
-                {"date": "2026-10-02", "price": "17.2"},
+            "priceHistory": [
+                {"asOfDate": "2026-10-01", "price": "17.1"},
+                {"asOfDate": "2026-10-02", "price": "17.2"},
             ]
         }
     )
-    history = parse_manulife_fundhistory(known_shape_payload)
+    history = parse_manulife_fundhistory(payload)
     assert len(history) == 2
     assert history[0].price_date.isoformat() == "2026-10-01"
-    assert str(history[0].nav) == "17.1"
+    assert str(history[0].price) == "17.1"
 
 
 def test_manulife_fundhistory_parser_handles_price_history_shape() -> None:
@@ -117,4 +107,4 @@ def test_manulife_fundhistory_parser_handles_price_history_shape() -> None:
     history = parse_manulife_fundhistory(payload)
     assert len(history) == 2
     assert history[0].price_date.isoformat() == "2026-10-01"
-    assert str(history[0].nav) == "10.1"
+    assert str(history[0].price) == "10.1"

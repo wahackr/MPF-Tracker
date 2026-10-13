@@ -13,8 +13,8 @@ if str(WORKER_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(WORKER_SRC_DIR))
 
 from src.libs.http_client import ProviderHttpError  # type: ignore[import-not-found]
-from src.libs.hsbc import fetch_hsbc_all_funds_csv  # type: ignore[import-not-found]
-from src.libs.manulife import fetch_manulife_fundhistory, fetch_manulife_fundslist  # type: ignore[import-not-found]
+from src.libs.crawlers.hsbc import fetch_all_funds_csv  # type: ignore[import-not-found]
+from src.libs.crawlers.manulife import fetch_manulife_fundhistory, fetch_manulife_fundslist  # type: ignore[import-not-found]
 
 
 FIXTURES_DIR = REPO_ROOT / "mpf-codex-handoff" / "fixtures"
@@ -47,8 +47,6 @@ class _FakeHttpClientFactory:
 
 def _fetch_options(
     *,
-    use_fixtures: bool,
-    fixture_dir: Path | None,
     retries: int = 3,
     backoff_seconds: float = 1.0,
 ):
@@ -56,33 +54,33 @@ def _fetch_options(
         "timeout_seconds": 30.0,
         "retries": retries,
         "backoff_seconds": backoff_seconds,
-        "use_fixtures": use_fixtures,
-        "fixture_dir": fixture_dir,
     }
 
 
-def test_fixture_mode_reads_real_hsbc_csv() -> None:
-    options = _fetch_options(use_fixtures=True, fixture_dir=FIXTURES_DIR)
-    result = fetch_hsbc_all_funds_csv(from_date=date(2026, 9, 1), to_date=date(2026, 10, 7), **options)
-    assert result["source"] == "hsbc.fixture"
+def test_mocked_http_response_reads_real_hsbc_csv(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = (FIXTURES_DIR / "hsbc_all_supertrust_20260901_20261007.csv").read_text(encoding="utf-8")
+
+    def fake_request(_client, method, url, **_kwargs):
+        return httpx.Response(200, request=httpx.Request(method, url), text=payload)
+
+    monkeypatch.setattr(httpx.Client, "request", fake_request)
+    result = fetch_all_funds_csv(from_date=date(2026, 9, 1), to_date=date(2026, 10, 7), **_fetch_options())
+    assert result["source"] == "hsbc.download-funds"
     assert result["status_code"] == 200
-    assert result["fetched_at"] == "fixture"
     assert "Constituent Fund" in result["payload"]
 
 
-def test_fixture_mode_reads_real_manulife_fundslist_json() -> None:
-    options = _fetch_options(use_fixtures=True, fixture_dir=FIXTURES_DIR)
-    result = fetch_manulife_fundslist(**options)
-    assert result["source"] == "manulife.fixture.fundslist"
+def test_mocked_http_response_reads_real_manulife_fundslist_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = (FIXTURES_DIR / "manulife_fundslist.json").read_text(encoding="utf-8")
+
+    def fake_request(_client, method, url, **_kwargs):
+        return httpx.Response(200, request=httpx.Request(method, url), text=payload)
+
+    monkeypatch.setattr(httpx.Client, "request", fake_request)
+    result = fetch_manulife_fundslist(**_fetch_options())
+    assert result["source"] == "manulife.fundslist"
     assert result["status_code"] == 200
-    assert result["fetched_at"] == "fixture"
     assert '"fundId"' in result["payload"]
-
-
-def test_fixture_mode_missing_manulife_fundhistory_is_explicitly_blocked(tmp_path: Path) -> None:
-    options = _fetch_options(use_fixtures=True, fixture_dir=tmp_path)
-    with pytest.raises(ProviderHttpError, match="unverified/blocked"):
-        fetch_manulife_fundhistory(fund_id="DHK111", **options)
 
 
 def test_hsbc_fetch_success_uses_expected_request_shape(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -99,8 +97,8 @@ def test_hsbc_fetch_success_uses_expected_request_shape(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(module.httpx, "Client", _FakeHttpClientFactory(responses, calls))
 
-    options = _fetch_options(use_fixtures=False, fixture_dir=None)
-    result = fetch_hsbc_all_funds_csv(from_date=date(2026, 10, 1), to_date=date(2026, 10, 7), **options)
+    options = _fetch_options()
+    result = fetch_all_funds_csv(from_date=date(2026, 10, 1), to_date=date(2026, 10, 7), **options)
 
     assert result == {
         "source": "hsbc.download-funds",
@@ -133,7 +131,7 @@ def test_manulife_fundslist_fetch_success_uses_expected_request_shape(
 
     monkeypatch.setattr(module.httpx, "Client", _FakeHttpClientFactory(responses, calls))
 
-    options = _fetch_options(use_fixtures=False, fixture_dir=None)
+    options = _fetch_options()
     result = fetch_manulife_fundslist(**options)
 
     assert result == {
@@ -170,7 +168,7 @@ def test_manulife_fundhistory_fetch_success_uses_expected_request_shape(
 
     monkeypatch.setattr(module.httpx, "Client", _FakeHttpClientFactory(responses, calls))
 
-    options = _fetch_options(use_fixtures=False, fixture_dir=None)
+    options = _fetch_options()
     result = fetch_manulife_fundhistory(fund_id="SHK122", **options)
 
     assert result == {
@@ -208,7 +206,7 @@ def test_retry_succeeds_after_transient_failure(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(module.httpx, "Client", _FakeHttpClientFactory(responses, calls))
     monkeypatch.setattr(module.time, "sleep", lambda seconds: sleeps.append(seconds))
 
-    options = _fetch_options(use_fixtures=False, fixture_dir=None, retries=3, backoff_seconds=0.25)
+    options = _fetch_options(retries=3, backoff_seconds=0.25)
     result = fetch_manulife_fundslist(**options)
 
     assert result["source"] == "manulife.fundslist"
@@ -247,9 +245,9 @@ def test_retry_exhaustion_raises_provider_error(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(module.httpx, "Client", _FakeHttpClientFactory(responses, calls))
     monkeypatch.setattr(module.time, "sleep", lambda seconds: sleeps.append(seconds))
 
-    options = _fetch_options(use_fixtures=False, fixture_dir=None, retries=3, backoff_seconds=0.1)
+    options = _fetch_options(retries=3, backoff_seconds=0.1)
     with pytest.raises(ProviderHttpError, match="Request failed after retries"):
-        fetch_hsbc_all_funds_csv(from_date=date(2026, 10, 1), to_date=date(2026, 10, 7), **options)
+        fetch_all_funds_csv(from_date=date(2026, 10, 1), to_date=date(2026, 10, 7), **options)
 
     assert len(calls) == 3
     assert sleeps == [0.1, 0.2]

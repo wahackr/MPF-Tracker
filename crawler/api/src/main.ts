@@ -108,7 +108,7 @@ export function crawlerRouter(): Router {
       const toDate = typeof req.query.to_date === "string" ? req.query.to_date : null;
       const rows = await query(
         `
-        SELECT fund_id, price_date, bid, offer, nav, source, fetched_at, updated_at
+        SELECT fund_id, price_date, bid, offer, price, source, fetched_at, updated_at
         FROM mpf.fund_prices
         WHERE fund_id = $1
           AND ($2::date IS NULL OR price_date >= $2::date)

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from src.libs.manulife import fetch_manulife_fundhistory, fetch_manulife_fundslist
-from src.libs.parsers import parse_manulife_fundhistory, parse_manulife_fundslist
+from src.libs.crawlers.manulife import (
+    fetch_manulife_fundhistory,
+    fetch_manulife_fundslist,
+    parse_manulife_fundhistory,
+    parse_manulife_fundslist,
+)
 
 
 pytestmark = pytest.mark.live
@@ -15,8 +19,7 @@ def test_live_manulife_fundslist_fetch_and_parse(live_fetch_options: dict[str, o
 
     assert result["status_code"] == 200
     assert records, "Expected non-empty Manulife funds list from live API"
-    assert any(record.display_frontend for record in records)
-    assert any(record.nav_as_of_date is not None for record in records)
+    assert any(record.fund_id for record in records)
 
 
 def test_live_manulife_fundhistory_smoke_or_explicit_skip(

@@ -25,6 +25,4 @@ def live_fetch_options() -> dict[str, object]:
         "timeout_seconds": 45.0,
         "retries": 3,
         "backoff_seconds": 1.5,
-        "use_fixtures": False,
-        "fixture_dir": None,
     }

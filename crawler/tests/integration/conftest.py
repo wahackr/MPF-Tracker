@@ -242,7 +242,6 @@ def integration_harness() -> ComposeHarness:
 
     env = os.environ.copy()
     env["COMPOSE_PROJECT_NAME"] = COMPOSE_PROJECT
-    env["CRAWLER_USE_FIXTURES"] = "true"
 
     with tempfile.TemporaryDirectory(prefix="mpf-itest-") as temporary_dir:
         temporary_path = Path(temporary_dir)

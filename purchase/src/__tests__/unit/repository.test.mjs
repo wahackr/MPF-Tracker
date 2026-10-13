@@ -29,4 +29,5 @@ test("price lookup is bounded by the requested as-of date", async () => {
   assert.equal(price.price, "1.25");
   assert.deepEqual(calls[0].params, ["fund-1", "2026-10-01", 14, "2026-10-05"]);
   assert.match(calls[0].sql, /fp\.price_date <= \$4::date/);
+  assert.match(calls[0].sql, /WHEN f\.provider = 'manulife' THEN fp\.price/);
 });

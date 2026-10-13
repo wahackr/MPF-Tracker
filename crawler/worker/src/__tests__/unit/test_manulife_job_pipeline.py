@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import date, datetime, timedelta
+from datetime import date
 from decimal import Decimal
 import json
 from pathlib import Path
 import sys
-from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -171,9 +170,6 @@ def test_run_job_fetches_parses_and_saves_mocked_http_responses(
         provider="manulife",
         from_date=date(2026, 10, 7),
         to_date=date(2026, 10, 8),
-        manulife_filter_days=None,
-        mode="backfill",
-        config=CONFIG,
         pg_engine=engine,
     )
 
@@ -346,9 +342,6 @@ def test_run_job_runs_both_provider_pipelines(monkeypatch: pytest.MonkeyPatch) -
         provider="all",
         from_date=date(2026, 10, 1),
         to_date=date(2026, 10, 7),
-        manulife_filter_days=None,
-        mode="sync",
-        config=CONFIG,
         pg_engine=object(),
     )
 
@@ -387,54 +380,35 @@ def test_backfill_uses_explicit_date_range(monkeypatch: pytest.MonkeyPatch) -> N
         "provider": "manulife",
         "from_date": date(2020, 1, 1),
         "to_date": date(2026, 10, 7),
-        "manulife_filter_days": None,
-        "mode": "backfill",
-        "config": CONFIG,
         "pg_engine": engine,
     }
 
 
-def test_backfill_applies_explicit_recency_cap(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: dict = {}
-    def fake_crawl(**kwargs):
-        seen.update(kwargs)
-        return {
-            "records": [],
-            "funds_failed": [],
-        }
-
-    monkeypatch.setattr(jobs, "crawl_manulife", fake_crawl)
-    monkeypatch.setattr(
-        jobs, "save_manulife_records", lambda _engine, _records: {"inserted": 0}
-    )
-
-    jobs.process_backfill_job(
-        CONFIG,
-        object(),
-        {
-            "provider": "manulife",
-            "from_date": "2020-01-01",
-            "to_date": "2026-10-07",
-            "manulife_filter_days": 7,
-        },
-    )
-
-    today = datetime.now(tz=ZoneInfo("Asia/Hong_Kong")).date()
-    assert seen["from_date"] == today - timedelta(days=6)
-
-
-def test_backfill_rejects_cap_outside_requested_range() -> None:
-    with pytest.raises(ValueError, match="excludes the requested date range"):
-        jobs.process_backfill_job(
-            CONFIG,
-            object(),
+@pytest.mark.parametrize(
+    "payload, message",
+    [
+        ({"provider": "manulife"}, "from_date and to_date are required"),
+        (
             {
                 "provider": "manulife",
-                "from_date": "2020-01-01",
-                "to_date": "2020-01-31",
-                "manulife_filter_days": 7,
+                "from_date": "invalid",
+                "to_date": "2026-10-07",
             },
-        )
+            "from_date and to_date are required",
+        ),
+        (
+            {
+                "provider": "manulife",
+                "from_date": "2026-10-08",
+                "to_date": "2026-10-07",
+            },
+            "from_date must be <= to_date",
+        ),
+    ],
+)
+def test_backfill_rejects_invalid_date_ranges(payload: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        jobs.process_backfill_job(CONFIG, object(), payload)
 
 
 def test_sync_defaults_to_seven_day_window(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,7 +422,6 @@ def test_sync_defaults_to_seven_day_window(monkeypatch: pytest.MonkeyPatch) -> N
 
     jobs.process_sync_job(CONFIG, object(), {"provider": "manulife"})
 
-    assert seen["mode"] == "sync"
     assert (seen["to_date"] - seen["from_date"]).days == 6
 
 
@@ -480,9 +453,6 @@ def test_history_parse_failure_is_reported_per_fund(
         provider="manulife",
         from_date=date(2026, 10, 1),
         to_date=date(2026, 10, 7),
-        manulife_filter_days=None,
-        mode="sync",
-        config=CONFIG,
         pg_engine=object(),
     )
 

@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime, timedelta
 from typing import Any, TypedDict
 from uuid import UUID
@@ -83,6 +84,113 @@ def claim_next_crawler_job(pg_engine, lease_seconds: int) -> ClaimedJob | None:
         }
 
 
+def heartbeat_claim(
+    pg_engine,
+    *,
+    job_id: UUID,
+    attempts: int,
+    lease_seconds: int,
+) -> bool:
+    with begin_connection(pg_engine) as pg_connection:
+        result = pg_connection.execute(
+            text("""
+                UPDATE mpf.jobs
+                SET heartbeat_at = NOW(),
+                    lease_until = NOW() + (:lease_seconds * INTERVAL '1 second'),
+                    updated_at = NOW()
+                WHERE job_id = :job_id
+                  AND status = 'running'
+                  AND attempts = :attempts
+                """),
+            {
+                "job_id": str(job_id),
+                "attempts": attempts,
+                "lease_seconds": lease_seconds,
+            },
+        )
+        return result.rowcount > 0
+
+
+def complete_claimed_job(
+    pg_engine,
+    *,
+    job_id: UUID,
+    attempts: int,
+    result_payload: dict[str, Any],
+) -> bool:
+    with begin_connection(pg_engine) as pg_connection:
+        result = pg_connection.execute(
+            text("""
+                UPDATE mpf.jobs
+                SET
+                    status = :status,
+                    result = CAST(:result AS JSONB),
+                    error_message = NULL,
+                    lease_until = NULL,
+                    heartbeat_at = NOW(),
+                    updated_at = NOW()
+                WHERE job_id = :job_id
+                  AND status = 'running'
+                  AND attempts = :attempts
+                """),
+            {
+                "job_id": str(job_id),
+                "attempts": attempts,
+                "status": (
+                    "partial" if _has_fund_failures(result_payload) else "succeeded"
+                ),
+                "result": json.dumps(result_payload, default=_json_default),
+            },
+        )
+        return result.rowcount > 0
+
+
+def fail_claimed_job(
+    pg_engine, *, job_id: UUID, attempts: int, error_message: str
+) -> bool:
+    with begin_connection(pg_engine) as pg_connection:
+        result = pg_connection.execute(
+            text("""
+                UPDATE mpf.jobs
+                SET
+                    status = :status,
+                    error_message = :error_message,
+                    lease_until = CASE WHEN :status = 'queued'
+                        THEN NOW() + (:retry_delay_seconds * INTERVAL '1 second')
+                        ELSE NULL END,
+                    heartbeat_at = NOW(),
+                    updated_at = NOW()
+                WHERE job_id = :job_id
+                  AND status = 'running'
+                  AND attempts = :attempts
+                """),
+            {
+                "job_id": str(job_id),
+                "attempts": attempts,
+                "status": "queued" if attempts < MAX_ATTEMPTS else "failed",
+                "retry_delay_seconds": 30 * attempts,
+                "error_message": error_message[:4000],
+            },
+        )
+        return result.rowcount > 0
+
+
+def _has_fund_failures(result_payload: dict[str, Any]) -> bool:
+    if result_payload.get("funds_failed"):
+        return True
+
+    return any(
+        isinstance(provider_result, dict) and bool(provider_result.get("funds_failed"))
+        for provider_result in result_payload.values()
+    )
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, (date, datetime, UUID)):
+        return value.isoformat() if not isinstance(value, UUID) else str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
 def process_sync_job(config, pg_engine, payload: dict[str, Any]) -> dict[str, Any]:
 
     provider = payload["provider"]
@@ -98,35 +206,11 @@ def process_sync_job(config, pg_engine, payload: dict[str, Any]) -> dict[str, An
         provider=provider,
         from_date=from_date,
         to_date=to_date,
-        manulife_filter_days=None,
-        mode="sync",
-        config=config,
         pg_engine=pg_engine,
     )
 
 
 def process_backfill_job(config, pg_engine, payload: dict[str, Any]) -> dict[str, Any]:
-    """Run a fixed-date-range backfill crawl job.
-
-    Args:
-        payload: Job request payload from ``mpf.jobs.request``.
-            Required keys:
-                - provider: ``"all"``, ``"hsbc"``, or ``"manulife"``
-                - from_date: ``YYYY-MM-DD``
-                - to_date: ``YYYY-MM-DD``
-            Optional keys:
-                - manulife_filter_days: explicit recency cap for Manulife
-                  prices; omit it to use the full date range.
-
-    Returns:
-        Provider write results. When provider is ``all``, results are keyed
-        by provider name.
-
-    Raises:
-        KeyError: If ``provider`` is missing from payload.
-        ValueError: If provider is invalid, dates are missing/unparseable,
-            or ``from_date`` is greater than ``to_date``.
-    """
     provider = payload["provider"]
     from_date = _parse_date(payload.get("from_date"))
     to_date = _parse_date(payload.get("to_date"))
@@ -135,18 +219,10 @@ def process_backfill_job(config, pg_engine, payload: dict[str, Any]) -> dict[str
     if from_date > to_date:
         raise ValueError("from_date must be <= to_date")
 
-    filter_days_raw = payload.get("manulife_filter_days")
-    manulife_filter_days = int(filter_days_raw) if filter_days_raw is not None else None
-    if manulife_filter_days is not None and manulife_filter_days < 1:
-        raise ValueError("manulife_filter_days must be positive")
-
     return run_job(
         provider=provider,
         from_date=from_date,
         to_date=to_date,
-        manulife_filter_days=manulife_filter_days,
-        mode="backfill",
-        config=config,
         pg_engine=pg_engine,
     )
 
@@ -156,9 +232,6 @@ def run_job(
     provider: str,
     from_date: date,
     to_date: date,
-    manulife_filter_days: int | None,
-    mode: str,
-    config,
     pg_engine,
 ) -> dict[str, Any]:
 
@@ -173,18 +246,6 @@ def run_job(
             f"provider must be one of: {', '.join(sorted(VALID_PROVIDERS))}"
         )
 
-    if manulife_filter_days is not None and manulife_filter_days < 1:
-        raise ValueError("manulife_filter_days must be positive")
-
-    manulife_from_date = from_date
-    if PROVIDER_MANULIFE in providers and manulife_filter_days is not None:
-        cutoff = datetime.now(tz=ZoneInfo("Asia/Hong_Kong")).date() - timedelta(
-            days=manulife_filter_days - 1
-        )
-        manulife_from_date = max(from_date, cutoff)
-        if manulife_from_date > to_date:
-            raise ValueError("manulife_filter_days excludes the requested date range")
-
     results_by_provider: dict[str, Any] = {}
 
     if PROVIDER_HSBC in providers:
@@ -198,7 +259,7 @@ def run_job(
 
     if PROVIDER_MANULIFE in providers:
         crawl_result = crawl_manulife(
-            from_date=manulife_from_date,
+            from_date=from_date,
             to_date=to_date,
         )
         save_result: dict[str, Any] = save_manulife_records(

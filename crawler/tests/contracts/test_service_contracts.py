@@ -21,7 +21,7 @@ def test_required_module_entrypoints_exist() -> None:
         assert file_path.exists(), f"Missing required module entrypoint: {file_path}"
 
 
-def test_only_crawler_has_worker_runtime() -> None:
+def test_only_crawler_has_worker_service() -> None:
     assert (REPO_ROOT / "crawler" / "worker").exists()
     assert not (REPO_ROOT / "portfolio" / "worker").exists()
     assert not (REPO_ROOT / "purchase" / "worker").exists()

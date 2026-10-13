@@ -15,8 +15,7 @@ const SyncSchema = z.object({
 const BackfillSchema = z.object({
   provider: ProviderSchema.default("all"),
   from_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  manulife_filter_days: z.number().int().min(1).max(90).optional()
+  to_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 });
 
 function parseLimit(raw: unknown, fallback: number, max: number): number {

@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from io import StringIO
 from typing import Iterable, TypedDict
@@ -13,7 +13,6 @@ from sqlalchemy.engine import Connection
 
 from ..http_client import FetchResult, request_with_retry
 from ..pgsql.main import begin_connection
-from ..stats import _date_chunks
 
 
 class ParseError(ValueError):
@@ -74,6 +73,16 @@ def crawl(*, from_date: date, to_date: date) -> HsbcCrawlResult:
         ),
         "chunks": chunks,
     }
+
+
+def _date_chunks(
+    from_date: date, to_date: date, *, chunk_days: int
+) -> Iterable[tuple[date, date]]:
+    current = from_date
+    while current <= to_date:
+        current_end = min(current + timedelta(days=chunk_days - 1), to_date)
+        yield (current, current_end)
+        current = current_end + timedelta(days=1)
 
 
 def fetch_all_funds_csv(

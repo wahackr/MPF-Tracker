@@ -12,44 +12,63 @@ WORKER_PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 if str(WORKER_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKER_PACKAGE_ROOT))
 
-from src.libs import db  # type: ignore[import-not-found]
+from src.libs.pgsql import main as pgsql
 
 
-def test_get_engine_uses_settings_database_url(monkeypatch) -> None:
-    monkeypatch.setattr(db, "get_settings", lambda: SimpleNamespace(database_url="postgresql+psycopg://u:p@h:5432/d"))
-    seen: list[str] = []
-    monkeypatch.setattr(db, "_engine_for_url", lambda url: seen.append(url) or "ENGINE")
+CONFIG = {
+    "PGSQL_HOST": "db-host",
+    "PGSQL_PORT": 5432,
+    "PGSQL_DB_NAME": "mpf",
+    "PGSQL_USER": "crawler",
+    "PGSQL_PASSWORD": "secret",
+}
 
-    engine = db.get_engine()
+
+def test_get_engine_uses_database_config(monkeypatch) -> None:
+    seen: list[tuple] = []
+    monkeypatch.setattr(
+        pgsql,
+        "create_engine",
+        lambda url, **kwargs: seen.append((url, kwargs)) or "ENGINE",
+    )
+
+    engine = pgsql.get_engine(CONFIG)
 
     assert engine == "ENGINE"
-    assert seen == ["postgresql+psycopg://u:p@h:5432/d"]
+    url, options = seen[0]
+    assert url.drivername == "postgresql+psycopg"
+    assert url.username == "crawler"
+    assert url.password == "secret"
+    assert url.host == "db-host"
+    assert url.port == 5432
+    assert url.database == "mpf"
+    assert options == {"pool_pre_ping": True}
 
 
-def test_begin_connection_yields_engine_begin_connection(monkeypatch) -> None:
+def test_begin_connection_yields_engine_connection() -> None:
     marker = object()
 
     @contextmanager
-    def _fake_begin():
+    def fake_begin():
         yield marker
 
-    monkeypatch.setattr(db, "get_engine", lambda: SimpleNamespace(begin=_fake_begin))
-    with db.begin_connection() as connection:
+    engine = SimpleNamespace(begin=fake_begin)
+    with pgsql.begin_connection(engine) as connection:
         assert connection is marker
 
 
-def test_ping_database_true_and_false(monkeypatch) -> None:
+def test_ping_database_returns_true_when_query_succeeds() -> None:
     @contextmanager
-    def _ok_connect():
-        yield SimpleNamespace(execute=lambda _stmt: None)
+    def connect():
+        yield SimpleNamespace(execute=lambda _statement: None)
 
-    monkeypatch.setattr(db, "get_engine", lambda: SimpleNamespace(connect=_ok_connect))
-    assert db.ping_database() is True
+    assert pgsql.ping_database(SimpleNamespace(connect=connect)) is True
 
+
+def test_ping_database_returns_false_when_connection_fails() -> None:
     @contextmanager
-    def _failing_connect():
+    def connect():
         raise SQLAlchemyError("db down")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(db, "get_engine", lambda: SimpleNamespace(connect=_failing_connect))
-    assert db.ping_database() is False
+    assert pgsql.ping_database(SimpleNamespace(connect=connect)) is False

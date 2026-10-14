@@ -117,6 +117,7 @@ services:
       - "${API_BIND_ADDRESS:-0.0.0.0}:${PORTFOLIO_API_HOST_PORT:-8002}:8000"
     environment:
       API_KEY: ${API_KEY}
+      VALUATION_API_URL: http://mpf-valuation:8000
       DB_HOST: ${POSTGRES_HOST}
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}

@@ -1,9 +1,52 @@
 import { Router } from "express";
-import { withTransaction } from "../libs/db.js";
+import { query, withTransaction } from "../libs/db.js";
 import { ReconciliationSchema, ensureAccountExists, ensureFundExists } from "../libs/portfolio.js";
 import { decimalString } from "../libs/rules.js";
 
 export function registerReconciliationsRoutes(router: Router): void {
+  /**
+   * GET /v1/accounts/:accountId/reconciliations
+   * Lists reconciliation records with the verified balances recorded on each date.
+   */
+  router.get("/accounts/:accountId/reconciliations", async (req, res, next) => {
+    try {
+      await ensureAccountExists(req.params.accountId);
+      const result = await query(
+        `
+        SELECT
+          rr.reconciliation_id,
+          rr.effective_date::text,
+          rr.notes,
+          rr.created_at,
+          COALESCE(
+            json_agg(json_build_object('fund_id', hb.fund_id, 'units', hb.units::text))
+              FILTER (WHERE hb.baseline_id IS NOT NULL),
+            '[]'::json
+          ) AS holdings
+        FROM mpf.reconciliation_records rr
+        LEFT JOIN mpf.holdings_baselines hb
+          ON hb.account_id = rr.account_id
+          AND hb.effective_date = rr.effective_date
+          AND hb.source = 'reconciliation'
+        WHERE rr.account_id = $1::uuid
+        GROUP BY rr.reconciliation_id
+        ORDER BY rr.effective_date DESC, rr.created_at DESC
+        `,
+        [req.params.accountId]
+      );
+      res.json({ account_id: req.params.accountId, items: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * POST /v1/accounts/:accountId/reconciliations
+   * Appends an authoritative eMPF reconciliation, creates verified holding
+   * baselines, and invalidates derived snapshots. Path parameter: accountId
+   * (UUID). Body: effective_date, optional notes, and holdings[] containing
+   * fund_id and units.
+   */
   router.post("/accounts/:accountId/reconciliations", async (req, res, next) => {
     try {
       const payload = ReconciliationSchema.parse(req.body ?? {});

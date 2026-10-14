@@ -89,5 +89,27 @@ export function portfolioRouter(): Router {
       next(error);
     }
   });
+  router.get("/valuation/history", async (req, res, next) => {
+    try {
+      const accountId = typeof req.query.account_id === "string" ? req.query.account_id : "";
+      if (!accountId) {
+        res.status(400).json({ detail: "account_id query parameter is required" });
+        return;
+      }
+      const valuationUrl = new URL("/v1/valuation/history", process.env.VALUATION_API_URL ?? "http://mpf-valuation:8000");
+      valuationUrl.searchParams.set("account_id", accountId);
+      for (const key of ["from_date", "to_date"] as const) {
+        const value = req.query[key];
+        if (typeof value === "string") valuationUrl.searchParams.set(key, value);
+      }
+      const response = await fetch(valuationUrl, {
+        headers: { "X-API-Key": req.header("X-API-Key") ?? "" }
+      });
+      const payload = await response.json().catch(() => ({}));
+      res.status(response.status).json(payload);
+    } catch (error) {
+      next(error);
+    }
+  });
   return router;
 }

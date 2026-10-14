@@ -4,6 +4,56 @@ import { query, withTransaction } from "../libs/db.js";
 import { ContributionPlanSchema, ensureAccountExists } from "../libs/portfolio.js";
 
 export function registerPlansRoutes(router: Router): void {
+  /**
+   * GET /v1/accounts/:accountId/contribution-history
+   * Lists processed contribution events and their estimated or confirmed transactions.
+   */
+  router.get("/accounts/:accountId/contribution-history", async (req, res, next) => {
+    try {
+      await ensureAccountExists(req.params.accountId);
+      const rows = await query(
+        `
+        SELECT
+          ce.event_id,
+          ce.period::text,
+          ce.expected_date::text,
+          ce.amount::text,
+          ce.status,
+          ce.created_at,
+          cp.contribution_stream,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'fund_id', pt.fund_id,
+                'trade_date', pt.trade_date::text,
+                'cash_amount', pt.cash_amount::text,
+                'unit_price', pt.unit_price::text,
+                'units_delta', pt.units_delta::text,
+                'status', pt.status
+              ) ORDER BY pt.trade_date, pt.fund_id
+            ) FILTER (WHERE pt.transaction_id IS NOT NULL),
+            '[]'::json
+          ) AS transactions
+        FROM mpf.contribution_events ce
+        JOIN mpf.contribution_plans cp ON cp.plan_id = ce.plan_id
+        LEFT JOIN mpf.purchase_transactions pt ON pt.event_id = ce.event_id
+        WHERE cp.account_id = $1::uuid
+        GROUP BY ce.event_id, cp.contribution_stream
+        ORDER BY ce.expected_date DESC, ce.created_at DESC
+        `,
+        [req.params.accountId]
+      );
+      res.json({ account_id: req.params.accountId, count: rows.rows.length, items: rows.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * GET /v1/accounts/:accountId/contribution-plans
+   * Lists current and historical contribution plans. Path parameter: accountId
+   * (UUID).
+   */
   router.get("/accounts/:accountId/contribution-plans", async (req, res, next) => {
     try {
       await ensureAccountExists(req.params.accountId);
@@ -22,6 +72,12 @@ export function registerPlansRoutes(router: Router): void {
     }
   });
 
+  /**
+   * PUT /v1/accounts/:accountId/contribution-plans
+   * Replaces the active plan for one contribution stream. Path parameter:
+   * accountId (UUID). Body: contribution_stream, positive amount, expected_day
+   * (1-31), effective_from, and optional effective_to.
+   */
   router.put("/accounts/:accountId/contribution-plans", async (req, res, next) => {
     try {
       const payload = ContributionPlanSchema.parse(req.body ?? {});

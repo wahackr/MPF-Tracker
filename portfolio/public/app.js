@@ -5,8 +5,10 @@ const state = {
   holdings: [],
   allocations: [],
   plans: [],
+  contributionHistory: [],
   reconciliations: [],
   funds: new Map(),
+  snapshotHistory: [],
   valuation: null
 };
 
@@ -244,6 +246,54 @@ function renderAccountWorkspace() {
     "No contribution plans have been configured."
   );
 
+  const money = new Intl.NumberFormat("en-HK", {
+    style: "currency",
+    currency: account.currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  renderTable(
+    "#contribution-history-table",
+    [
+      { label: "Run date", key: "created_at", format: (value) => value ? new Date(value).toLocaleString("en-HK") : "—" },
+      { label: "Expected date", key: "expected_date", format: dateOnly },
+      { label: "Stream", key: "contribution_stream" },
+      { label: "Contribution", key: "amount", format: (value) => money.format(Number(value)) },
+      { label: "Status", key: "status" },
+      {
+        label: "Fund transactions",
+        key: "transactions",
+        format: (transactions) => transactions.length
+          ? transactions.map((transaction) => `${fundName(transaction.fund_id)}: ${money.format(Number(transaction.cash_amount))} at ${formatNumber(transaction.unit_price)} → ${formatNumber(transaction.units_delta)} units (${transaction.status})`).join(" · ")
+          : "—"
+      }
+    ],
+    state.contributionHistory,
+    "No contribution events have been processed for this account yet."
+  );
+
+  renderTable(
+    "#valuation-history-table",
+    [
+      { label: "As of", key: "as_of_date", format: dateOnly },
+      {
+        label: "Value",
+        key: "total_value",
+        format: (value, row) => value === null ? "—" : new Intl.NumberFormat("en-HK", {
+          style: "currency",
+          currency: row.currency ?? account.currency,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        }).format(Number(value))
+      },
+      { label: "Status", key: "calculation_status" },
+      { label: "Calculated", key: "calculated_at", format: (value) => value ? new Date(value).toLocaleString("en-HK") : "—" },
+      { label: "Revision", key: "revision" }
+    ],
+    state.snapshotHistory,
+    "No valuation snapshots have been saved for this account yet."
+  );
+
   renderAccountList();
 }
 
@@ -260,23 +310,27 @@ async function loadAccounts({ selectId } = {}) {
 
 async function selectAccount(accountId) {
   try {
-    const [account, holdings, allocations, plans, reconciliations] = await Promise.all([
+    const [account, holdings, allocations, plans, reconciliations, contributionHistory] = await Promise.all([
       api(`/v1/accounts/${accountId}`),
       api(`/v1/accounts/${accountId}/holdings`),
       api(`/v1/accounts/${accountId}/allocation-rules`),
       api(`/v1/accounts/${accountId}/contribution-plans`),
-      api(`/v1/accounts/${accountId}/reconciliations`)
+      api(`/v1/accounts/${accountId}/reconciliations`),
+      api(`/v1/accounts/${accountId}/contribution-history`)
     ]);
     state.selectedAccount = account;
     state.holdings = holdings.items;
     state.allocations = allocations.items;
     state.plans = plans.items;
+    state.contributionHistory = contributionHistory.items;
     state.reconciliations = reconciliations.items;
+    state.snapshotHistory = [];
     state.funds = new Map();
     const fundIds = [
       ...holdings.items.map((holding) => holding.fund_id),
       ...allocations.items.map((allocation) => allocation.fund_id),
-      ...reconciliations.items.flatMap((item) => item.holdings.map((holding) => holding.fund_id))
+      ...reconciliations.items.flatMap((item) => item.holdings.map((holding) => holding.fund_id)),
+      ...contributionHistory.items.flatMap((event) => event.transactions.map((transaction) => transaction.fund_id))
     ];
     await loadFundNames(fundIds);
     state.valuation = null;
@@ -507,6 +561,25 @@ async function loadHoldingsChart() {
   }
 }
 
+async function loadSnapshotHistory() {
+  if (!state.selectedAccount) return;
+  const accountId = state.selectedAccount.account_id;
+  const button = $("#refresh-valuation-history");
+  button.disabled = true;
+  button.textContent = "Loading…";
+  try {
+    const result = await api(`/v1/valuation/history?account_id=${encodeURIComponent(accountId)}`);
+    if (state.selectedAccount?.account_id !== accountId) return;
+    state.snapshotHistory = result.items ?? [];
+    renderAccountWorkspace();
+  } catch (error) {
+    showToast(errorMessage(error), "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Refresh history";
+  }
+}
+
 function registerTabs() {
   for (const tab of $$(".tab")) {
     tab.addEventListener("click", () => {
@@ -515,6 +588,7 @@ function registerTabs() {
         panel.hidden = panel.dataset.panel !== tab.dataset.tab;
       }
       if (tab.dataset.tab === "holdings") loadHoldingsChart();
+      if (tab.dataset.tab === "valuation") loadSnapshotHistory();
     });
   }
 }
@@ -540,6 +614,27 @@ function registerForms() {
   });
 
   $("#refresh-holdings-chart").addEventListener("click", loadHoldingsChart);
+
+  $("#refresh-valuation-history").addEventListener("click", loadSnapshotHistory);
+
+  $("#refresh-contribution-history").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Loading…";
+    try {
+      const accountId = selectedAccountId();
+      const result = await api(`/v1/accounts/${accountId}/contribution-history`);
+      if (state.selectedAccount?.account_id !== accountId) return;
+      state.contributionHistory = result.items;
+      await loadFundNames(result.items.flatMap((item) => item.transactions.map((transaction) => transaction.fund_id)));
+      renderAccountWorkspace();
+    } catch (error) {
+      showToast(errorMessage(error), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "Refresh history";
+    }
+  });
 
   $("#load-valuation").addEventListener("click", async (event) => {
     const button = event.currentTarget;

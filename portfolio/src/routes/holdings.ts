@@ -4,6 +4,11 @@ import { BaselineSchema, ensureAccountExists, ensureFundExists } from "../libs/p
 import { decimalString } from "../libs/rules.js";
 
 export function registerHoldingsRoutes(router: Router): void {
+  /**
+   * GET /v1/accounts/:accountId/holdings
+   * Lists every recorded holding baseline for an account. Path parameter:
+   * accountId (UUID).
+   */
   router.get("/accounts/:accountId/holdings", async (req, res, next) => {
     try {
       await ensureAccountExists(req.params.accountId);
@@ -22,6 +27,13 @@ export function registerHoldingsRoutes(router: Router): void {
     }
   });
 
+  /**
+   * POST /v1/accounts/:accountId/baselines
+   * Records a dated set of fund unit balances and invalidates derived snapshots.
+   * Path parameter: accountId (UUID). Body: effective_date, source,
+   * verification_status (VERIFIED or ESTIMATED), and holdings[] containing
+   * fund_id and units.
+   */
   router.post("/accounts/:accountId/baselines", async (req, res, next) => {
     try {
       const payload = BaselineSchema.parse(req.body ?? {});

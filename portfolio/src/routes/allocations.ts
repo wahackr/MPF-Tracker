@@ -4,6 +4,11 @@ import { AllocationRuleSchema, ensureAccountExists, ensureFundExists } from "../
 import { allocationWeightError, decimalString } from "../libs/rules.js";
 
 export function registerAllocationsRoutes(router: Router): void {
+  /**
+   * GET /v1/accounts/:accountId/allocation-rules
+   * Lists current and historical allocation rules. Path parameter: accountId
+   * (UUID).
+   */
   router.get("/accounts/:accountId/allocation-rules", async (req, res, next) => {
     try {
       await ensureAccountExists(req.params.accountId);
@@ -22,6 +27,13 @@ export function registerAllocationsRoutes(router: Router): void {
     }
   });
 
+  /**
+   * PUT /v1/accounts/:accountId/allocation-rules
+   * Versions the allocation for one contribution stream. Path parameter:
+   * accountId (UUID). Body: effective_from, optional effective_to,
+   * contribution_stream, and allocations[] containing fund_id and weight. The
+   * submitted weights must total exactly 100.
+   */
   router.put("/accounts/:accountId/allocation-rules", async (req, res, next) => {
     try {
       const payload = AllocationRuleSchema.parse(req.body ?? {});

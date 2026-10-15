@@ -6,7 +6,8 @@ import { ContributionPlanSchema, ensureAccountExists } from "../libs/portfolio.j
 export function registerPlansRoutes(router: Router): void {
   /**
    * GET /v1/accounts/:accountId/contribution-history
-   * Lists processed contribution events and their estimated or confirmed transactions.
+   * Lists processed contribution events and their estimated or confirmed
+   * transactions. Path parameter: accountId (UUID).
    */
   router.get("/accounts/:accountId/contribution-history", async (req, res, next) => {
     try {

@@ -1,4 +1,5 @@
 import express, { NextFunction, Request, Response } from "express";
+import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 
 import { requireApiKey } from "./libs/auth.js";
@@ -7,7 +8,13 @@ import { portfolioRouter } from "./main.js";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+app.use(express.static(fileURLToPath(new URL("../public", import.meta.url))));
 
+/**
+ * GET /health
+ * Reports whether the Portfolio API can connect to PostgreSQL. No parameters or
+ * API key are required.
+ */
 app.get("/health", async (_req, res) => {
   const ok = await healthCheck();
   if (ok) {

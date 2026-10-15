@@ -6,7 +6,8 @@ import { decimalString } from "../libs/rules.js";
 export function registerReconciliationsRoutes(router: Router): void {
   /**
    * GET /v1/accounts/:accountId/reconciliations
-   * Lists reconciliation records with the verified balances recorded on each date.
+   * Lists reconciliation records with the verified balances recorded on each
+   * date. Path parameter: accountId (UUID).
    */
   router.get("/accounts/:accountId/reconciliations", async (req, res, next) => {
     try {

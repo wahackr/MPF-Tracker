@@ -14,4 +14,5 @@ COPY portfolio/package.json /app/package.json
 COPY portfolio/package-lock.json /app/package-lock.json
 RUN npm ci --omit=dev
 COPY --from=build /app/dist /app/dist
+COPY portfolio/public /app/public
 CMD ["node", "dist/index.js"]

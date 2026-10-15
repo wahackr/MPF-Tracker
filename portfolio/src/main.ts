@@ -8,6 +8,13 @@ import { registerReconciliationsRoutes } from "./routes/reconciliations.js";
 
 export function portfolioRouter(): Router {
   const router = Router();
+  /**
+   * GET /v1/funds
+   * Resolves fund IDs for display or searches funds for the dashboard picker.
+   * Query parameters: ids (optional comma-separated fund IDs, maximum 100) or
+   * search (optional name, ID, provider code, or alias fragment; minimum two
+   * characters). When ids is supplied, it takes precedence over search.
+   */
   router.get("/funds", async (req, res, next) => {
     try {
       const fundIds = typeof req.query.ids === "string"
@@ -70,6 +77,11 @@ export function portfolioRouter(): Router {
   registerAllocationsRoutes(router);
   registerPlansRoutes(router);
   registerReconciliationsRoutes(router);
+  /**
+   * GET /v1/valuation/latest
+   * Proxies the latest on-demand valuation from the Valuation API for display
+   * in the portfolio dashboard. Query parameter: account_id (required UUID).
+   */
   router.get("/valuation/latest", async (req, res, next) => {
     try {
       const accountId = typeof req.query.account_id === "string" ? req.query.account_id : "";
@@ -89,6 +101,12 @@ export function portfolioRouter(): Router {
       next(error);
     }
   });
+  /**
+   * GET /v1/valuation/history
+   * Proxies saved valuation snapshots from the Valuation API. Query parameters:
+   * account_id (required UUID), from_date (optional YYYY-MM-DD), and to_date
+   * (optional YYYY-MM-DD).
+   */
   router.get("/valuation/history", async (req, res, next) => {
     try {
       const accountId = typeof req.query.account_id === "string" ? req.query.account_id : "";

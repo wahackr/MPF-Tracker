@@ -3,6 +3,10 @@ import { query } from "../libs/db.js";
 import { CreateAccountSchema, UpdateAccountSchema, ensureAccountExists } from "../libs/portfolio.js";
 
 export function registerAccountsRoutes(router: Router): void {
+  /**
+   * GET /v1/accounts
+   * Lists all MPF accounts, newest first. Parameters: none.
+   */
   router.get("/accounts", async (_req, res, next) => {
     try {
       const rows = await query(
@@ -18,6 +22,11 @@ export function registerAccountsRoutes(router: Router): void {
     }
   });
 
+  /**
+   * POST /v1/accounts
+   * Creates an account. Body: provider, scheme, display_label, and an optional
+   * three-letter currency (defaults to HKD).
+   */
   router.post("/accounts", async (req, res, next) => {
     try {
       const payload = CreateAccountSchema.parse(req.body ?? {});
@@ -35,6 +44,10 @@ export function registerAccountsRoutes(router: Router): void {
     }
   });
 
+  /**
+   * GET /v1/accounts/:accountId
+   * Returns one account. Path parameter: accountId (UUID).
+   */
   router.get("/accounts/:accountId", async (req, res, next) => {
     try {
       const rows = await query(
@@ -55,6 +68,11 @@ export function registerAccountsRoutes(router: Router): void {
     }
   });
 
+  /**
+   * PUT /v1/accounts/:accountId
+   * Updates an account. Path parameter: accountId (UUID). Body accepts one or
+   * more of display_label, currency, and active.
+   */
   router.put("/accounts/:accountId", async (req, res, next) => {
     try {
       const payload = UpdateAccountSchema.parse(req.body ?? {});

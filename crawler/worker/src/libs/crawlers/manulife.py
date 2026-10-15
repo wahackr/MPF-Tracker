@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection
 
 from ..http_client import FetchResult, ProviderHttpError, request_with_retry
 from ..pgsql.main import begin_connection
+from ..snapshots import invalidate_price_snapshots
 
 
 class ParseError(ValueError):
@@ -266,6 +267,7 @@ def save_records(
     inserted = updated = unchanged = 0
     min_changed_date: date | None = None
     max_changed_date: date | None = None
+    changed_funds: dict[str, date] = {}
 
     with begin_connection(pg_engine) as pg_connection:
         for record in records:
@@ -302,6 +304,9 @@ def save_records(
                 unchanged += 1
                 continue
 
+            changed_funds[fund_id] = min(
+                changed_funds.get(fund_id, record.price_date), record.price_date
+            )
             if row["inserted"]:
                 inserted += 1
             else:
@@ -311,6 +316,8 @@ def save_records(
                 min_changed_date = record.price_date
             if max_changed_date is None or record.price_date > max_changed_date:
                 max_changed_date = record.price_date
+
+        invalidate_price_snapshots(pg_connection, changed_funds)
 
         return {
             "inserted": inserted,

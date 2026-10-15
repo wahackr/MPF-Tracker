@@ -9,7 +9,7 @@ See [README.md](./README.md) for installation, configuration, API usage, and tes
 ```mermaid
 flowchart LR
     Browser[Browser dashboard] --> Portfolio[Portfolio API]
-    Scheduler[n8n or API client] --> Crawler[Crawler API]
+    Scheduler[User-managed scheduler or API client] --> Crawler[Crawler API]
     Scheduler --> Purchase[Purchase API]
     Scheduler --> Valuation[Valuation API]
     Portfolio -->|HTTP valuation proxy| Valuation
@@ -32,7 +32,7 @@ flowchart LR
 | `mpf-db` | PostgreSQL 17 | Store authoritative inputs, crawler queue, and derived snapshots |
 | `mpf-migrate` | One-shot Python process | Create/update database roles and apply SQL schema files |
 
-The four APIs listen on port `8000` inside their containers. Compose publishes them on host ports `8001`–`8004` by default. The worker exposes no HTTP server. n8n runs separately and reaches APIs through an existing external Docker network.
+The four APIs listen on port `8000` inside their containers. Compose publishes them on host ports `8001`–`8004` by default. The worker exposes no HTTP server. An external scheduler can reach the APIs through published host ports or the shared external Docker network.
 
 ## Source organization
 
@@ -72,7 +72,6 @@ valuation/src/
   __tests__/unit/
 migrations/sql/                 Shared schema, constraints, indexes, and grants
 scripts/migrate.py              Role setup and ordered SQL execution
-n8n/workflows/                  Importable HTTP scheduling examples
 mpf-codex-handoff/fixtures/      Saved provider responses for deterministic tests
 ```
 
@@ -153,7 +152,7 @@ Invalidation rows carry an optional account and date bounds. Valuation marks mat
 
 API `/health` endpoints return readiness based on a database query and require no key. The worker container health check also checks database connectivity; it does not prove that its polling loop or a provider endpoint is healthy.
 
-The imported n8n examples schedule price sync at 07:00, purchase processing at 08:00, and snapshots at 08:30 in `Asia/Hong_Kong`. Crawler workflows poll until terminal and reject `partial` or `failed` results. These schedules are independent and do not guarantee completion order. Manual workflows provide HSBC backfill and on-demand valuation. n8n accesses application APIs over HTTP and does not require direct database access.
+Users must provide their own scheduler or make API calls manually. The daily sequence is price sync, purchase processing, then valuation snapshots. The caller must poll the asynchronous crawler job until `succeeded` before proceeding and handle `partial` or `failed` results. Purchase processing must finish before snapshot creation. See [the scheduling instructions](./README.md#schedule-requests-yourself) for request examples and recovery guidance. No scheduler or importable workflows are included in this repository.
 
 ## Test boundaries
 

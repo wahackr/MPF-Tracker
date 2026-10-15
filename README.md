@@ -2,7 +2,7 @@
 
 Track Hong Kong MPF accounts using HSBC and Manulife fund prices, dated holdings baselines, contribution estimates, and portfolio valuations. A browser dashboard provides account management, fund search, allocation and contribution-plan editing, reconciliation, and valuation history.
 
-The repository contains four application modules: crawler, portfolio, purchase, and valuation. The crawler runs as a TypeScript API plus a Python worker; the other modules are TypeScript Express services. Each service owns its source and dependencies, and PostgreSQL schema permissions control which tables it can write. Optional n8n workflows schedule operations over HTTP. The portfolio service also proxies valuation requests for its dashboard.
+The repository contains four application modules: crawler, portfolio, purchase, and valuation. The crawler runs as a TypeScript API plus a Python worker; the other modules are TypeScript Express services. Each service owns its source and dependencies, and PostgreSQL schema permissions control which tables it can write. Users must schedule recurring operations themselves by calling the HTTP APIs; the stack does not include a scheduler. The portfolio service also proxies valuation requests for its dashboard.
 
 ## Services and data flow
 
@@ -16,11 +16,11 @@ The repository contains four application modules: crawler, portfolio, purchase, 
 | `mpf-db` | PostgreSQL 17; shared `mpf` schema | `localhost:5432` |
 | `mpf-migrate` | Create/update database roles and apply SQL migrations | One-shot process |
 
-All API containers listen on port `8000` internally. Docker clients such as n8n use service names, for example `http://mpf-crawler-api:8000`.
+All API containers listen on port `8000` internally. Clients on the shared Docker network use service names, for example `http://mpf-crawler-api:8000`.
 
 ```mermaid
 flowchart LR
-    N[n8n or API client] --> C[Crawler API]
+    N[User-managed scheduler or API client] --> C[Crawler API]
     C --> J[(PostgreSQL jobs)]
     J --> W[Python crawler worker]
     F[HSBC and Manulife] --> W
@@ -38,7 +38,7 @@ Crawler jobs are asynchronous: `queued` → `running` → `succeeded`, `partial`
 
 ## Quick start
 
-Requirements: Docker Engine with Docker Compose v2 and outbound access to the provider APIs. n8n is optional and is not included in this Compose stack.
+Requirements: Docker Engine with Docker Compose v2 and outbound access to the provider APIs.
 
 1. Create your configuration if `.env` does not already exist:
 
@@ -54,7 +54,7 @@ Requirements: Docker Engine with Docker Compose v2 and outbound access to the pr
    docker network inspect automation >/dev/null 2>&1 || docker network create automation
    ```
 
-   This network is required even when running without n8n. If using n8n, attach its container to the same network.
+   This network is required by the current Compose configuration. Attach any container-based scheduler to it if you want to call the APIs by service name.
 
 3. Build and start the stack:
 
@@ -217,7 +217,6 @@ All paths below require `X-API-Key`. IDs for accounts and jobs are UUIDs; fund I
 ├── valuation/src/               # Valuation, snapshots, unit tests
 ├── migrations/sql/              # Shared schema and database grants
 ├── scripts/migrate.py           # Role setup and SQL migration runner
-├── n8n/workflows/               # Five importable workflow examples
 ├── mpf-codex-handoff/            # Implementation notes and saved provider fixtures
 └── .github/workflows/test.yml   # Python, TypeScript, and Docker integration CI
 ```
@@ -238,19 +237,47 @@ All service roles can read shared tables. Writes are restricted by [the SQL sche
 
 The migration runner creates or updates service login roles and executes sorted SQL files from `migrations/sql/`. It reruns the files on invocation; migrations must remain safe to reapply.
 
-## n8n workflows
+## Schedule requests yourself
 
-Import the JSON files from [`n8n/workflows/`](./n8n/workflows/) into an existing n8n instance. Configure its `API_KEY` environment variable to match the APIs, and connect n8n to `N8N_NETWORK`. The examples call the service DNS names over HTTP.
+The stack does not run recurring API requests automatically. Configure your own scheduler (for example, cron, a systemd timer, or an external automation service) to send the requests below with your configured `X-API-Key`. You can also run them manually.
 
-| Workflow | Schedule / purpose |
-| --- | --- |
-| `MPF-01-Daily-Prices.json` | 07:00 Asia/Hong_Kong; seven-day rolling sync for both providers |
-| `MPF-02-Manual-Backfill.json` | Manual HSBC recovery for the latest 14 calendar dates |
-| `MPF-03-Expected-Purchases.json` | 08:00 Asia/Hong_Kong; process due contributions |
-| `MPF-04-Daily-Valuation.json` | 08:30 Asia/Hong_Kong; save valuation snapshots |
-| `MPF-05-OnDemand-Valuation.json` | Manual on-demand valuation |
+| Order | Request | Purpose |
+| --- | --- | --- |
+| 1 | `POST http://localhost:8001/v1/crawl/jobs/sync` | Refresh both providers using a seven-day rolling window |
+| 2 | `POST http://localhost:8003/v1/purchases/process` | Process due contributions and retry estimates waiting for prices |
+| 3 | `POST http://localhost:8004/v1/valuation/snapshot` | Save valuations for dashboard history |
 
-The crawler examples poll jobs until terminal and fail on `partial` or `failed`. Review imported settings before activating schedules. The separate daily schedules do not enforce a dependency on the previous workflow completing.
+Run this sequence daily in `Asia/Hong_Kong`, for example starting at 07:00. Wait for the crawler job to succeed before processing purchases, then wait for purchase processing to finish before saving snapshots. Fixed time gaps alone do not guarantee that the previous operation has completed.
+
+The examples use the default host ports. Export `API_KEY` in the shell or scheduler environment before running them:
+
+```bash
+# 1. Queue a price refresh and record the returned job_id.
+curl --fail-with-body -sS http://localhost:8001/v1/crawl/jobs/sync \
+  -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"all","rolling_days":7}'
+
+# Poll using the returned job_id (replace the placeholder).
+curl --fail-with-body -sS http://localhost:8001/v1/crawl/jobs/JOB_ID \
+  -H "X-API-Key: $API_KEY"
+
+# 2. After the crawler succeeds, process purchases.
+curl --fail-with-body -sS http://localhost:8003/v1/purchases/process \
+  -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+
+# 3. After purchase processing finishes, save today's snapshots.
+curl --fail-with-body -sS http://localhost:8004/v1/valuation/snapshot \
+  -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{}'
+```
+
+Crawler submission returns HTTP `202`, which means the job was queued. Poll its status periodically (for example, every 30 seconds) while it is `queued` or `running`, with a timeout configured in your scheduler. Continue only on `succeeded`; inspect `result` and `error_message` for `partial` or `failed` jobs and resolve or retry them. Inspect purchase results for `WAITING_FOR_PRICE` or `FAILED_REVIEW`, and snapshot results for incomplete valuations.
+
+Empty purchase and snapshot bodies use today's date in Hong Kong and include all applicable accounts. Supply `as_of_date` (`YYYY-MM-DD`) to process an earlier month or save a historical snapshot. Purchase processing handles only the month containing that date, so process missed months explicitly. Use the backfill and rebuild endpoints in the API reference when recovering older prices or recalculating existing history.
 
 ## Development and testing
 

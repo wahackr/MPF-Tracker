@@ -47,7 +47,7 @@ export async function processPurchases(
     let failedEvents = 0;
     let insertedTransactions = 0;
     let updatedTransactions = 0;
-    let changedFromDate: string | null = null;
+    const changedFromDates = new Map<string, string>();
     const waitingDetails: Array<{ event_id: string; reason: string }> = [];
 
     for (const plan of plans) {
@@ -122,8 +122,9 @@ export async function processPurchases(
             updatedTransactions += 1;
           }
           // Estimated trades are never earlier than the expected date, including before an update.
-          if (!changedFromDate || expectedDate < changedFromDate) {
-            changedFromDate = expectedDate;
+          const previousDate = changedFromDates.get(plan.account_id);
+          if (!previousDate || expectedDate < previousDate) {
+            changedFromDates.set(plan.account_id, expectedDate);
           }
         }
       }
@@ -132,7 +133,7 @@ export async function processPurchases(
       estimatedEvents += 1;
     }
 
-    if (changedFromDate) {
+    for (const [changedAccountId, changedFromDate] of changedFromDates) {
       await client.query(
         `
         INSERT INTO mpf.snapshot_invalidation_requests (
@@ -140,7 +141,7 @@ export async function processPurchases(
         )
         VALUES ('purchase', 'purchase_estimation', $1::uuid, $2::date)
         `,
-        [accountId ?? null, changedFromDate]
+        [changedAccountId, changedFromDate]
       );
     }
 

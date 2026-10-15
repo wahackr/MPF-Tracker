@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>MPF Portfolio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="MPF Portfolio home">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <span>
+            <strong>MPF Portfolio</strong>
+            <small>Account administration</small>
+          </span>
+        </a>
+
+        <form id="connection-form" class="connection-form">
+          <label for="api-key">API key</label>
+          <input
+            id="api-key"
+            name="api_key"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Enter X-API-Key"
+            required
+          />
+          <button class="button button-primary button-small" type="submit">Connect</button>
+          <span id="connection-status" class="status-pill status-neutral">Not connected</span>
+        </form>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar">
+          <div class="section-heading">
+            <div>
+              <span class="eyebrow">Workspace</span>
+              <h1>Accounts</h1>
+            </div>
+            <button id="refresh-accounts" class="icon-button" type="button" aria-label="Refresh accounts">↻</button>
+          </div>
+
+          <div id="account-list" class="account-list">
+            <div class="sidebar-empty">Connect to load accounts.</div>
+          </div>
+
+          <details class="create-account-card">
+            <summary>New account</summary>
+            <form id="create-account-form" class="stacked-form">
+              <label>
+                Display name
+                <input name="display_label" type="text" maxlength="255" placeholder="My MPF account" required />
+              </label>
+              <div class="field-grid">
+                <label>
+                  Provider
+                  <input name="provider" type="text" maxlength="64" placeholder="HSBC" required />
+                </label>
+                <label>
+                  Scheme
+                  <input name="scheme" type="text" maxlength="64" placeholder="SuperTrust Plus" required />
+                </label>
+              </div>
+              <label>
+                Currency
+                <input name="currency" type="text" value="HKD" minlength="3" maxlength="3" required />
+              </label>
+              <button class="button button-primary" type="submit">Create account</button>
+            </form>
+          </details>
+        </aside>
+
+        <section class="content">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-icon" aria-hidden="true">◫</div>
+            <span class="eyebrow">Portfolio console</span>
+            <h2>Select an account</h2>
+            <p>Manage holdings, allocations, contribution plans, and reconciliations from one place.</p>
+          </div>
+
+          <div id="account-workspace" hidden>
+            <section class="account-hero">
+              <div>
+                <span id="account-provider" class="eyebrow"></span>
+                <h2 id="account-title"></h2>
+                <p id="account-scheme"></p>
+              </div>
+              <div class="account-meta">
+                <span id="account-currency" class="meta-chip"></span>
+                <span id="account-active" class="meta-chip"></span>
+              </div>
+            </section>
+
+            <nav class="tabs" aria-label="Portfolio sections">
+              <button class="tab active" type="button" data-tab="overview">Overview</button>
+              <button class="tab" type="button" data-tab="holdings">Holdings</button>
+              <button class="tab" type="button" data-tab="allocations">Allocations</button>
+              <button class="tab" type="button" data-tab="plans">Contributions</button>
+              <button class="tab" type="button" data-tab="valuation">Valuation</button>
+              <button class="tab" type="button" data-tab="reconcile">Reconcile</button>
+            </nav>
+
+            <section class="tab-panel" data-panel="overview">
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">Account details</span>
+                  <h3>Overview</h3>
+                </div>
+              </div>
+              <div class="overview-grid">
+                <article class="metric-card">
+                  <span>Holding records</span>
+                  <strong id="holding-count">0</strong>
+                  <small>Historical baselines</small>
+                </article>
+                <article class="metric-card">
+                  <span>Allocation rules</span>
+                  <strong id="allocation-count">0</strong>
+                  <small>Current and historical</small>
+                </article>
+                <article class="metric-card">
+                  <span>Contribution plans</span>
+                  <strong id="plan-count">0</strong>
+                  <small>All plan versions</small>
+                </article>
+              </div>
+
+              <article class="form-card compact-card">
+                <div class="card-heading">
+                  <div>
+                    <h4>Edit account</h4>
+                    <p>Update the account label, currency, or active status.</p>
+                  </div>
+                </div>
+                <form id="update-account-form" class="horizontal-form">
+                  <label>
+                    Display name
+                    <input name="display_label" type="text" maxlength="255" required />
+                  </label>
+                  <label>
+                    Currency
+                    <input name="currency" type="text" minlength="3" maxlength="3" required />
+                  </label>
+                  <label class="checkbox-label">
+                    <input name="active" type="checkbox" />
+                    Active
+                  </label>
+                  <button class="button button-primary" type="submit">Save changes</button>
+                </form>
+              </article>
+            </section>
+
+            <section class="tab-panel" data-panel="valuation" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">Current fund prices</span>
+                  <h3>Latest valuation</h3>
+                  <p>Calculate the selected account using the latest available prices as of today.</p>
+                </div>
+                <button id="load-valuation" class="button button-primary" type="button">Check valuation</button>
+              </div>
+              <div id="valuation-message" class="table-empty">Select “Check valuation” to load the latest result.</div>
+              <div id="valuation-results" hidden>
+                <div class="overview-grid valuation-metrics">
+                  <article class="metric-card">
+                    <span>Account value</span>
+                    <strong id="valuation-total">—</strong>
+                    <small id="valuation-currency"></small>
+                  </article>
+                  <article class="metric-card">
+                    <span>Calculation status</span>
+                    <strong id="valuation-status">—</strong>
+                    <small id="valuation-as-of"></small>
+                  </article>
+                  <article class="metric-card">
+                    <span>Unpriced funds</span>
+                    <strong id="valuation-unpriced">0</strong>
+                    <small id="valuation-calculated-at"></small>
+                  </article>
+                </div>
+                <div id="valuation-funds-table" class="table-wrap"></div>
+              </div>
+              <article class="form-card">
+                <div class="card-heading">
+                  <div>
+                    <h4>Snapshot history</h4>
+                    <p>Previously saved valuations for this account.</p>
+                  </div>
+                  <button id="refresh-valuation-history" class="button button-primary button-small" type="button">Refresh history</button>
+                </div>
+                <div id="valuation-history-table" class="table-wrap"></div>
+              </article>
+            </section>
+
+            <section class="tab-panel" data-panel="holdings" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">Unit balances</span>
+                  <h3>Holding baselines</h3>
+                  <p>Each submission records fund units as of one effective date.</p>
+                </div>
+              </div>
+              <article class="form-card holdings-allocation-card">
+                <div class="card-heading">
+                  <div>
+                    <h4>Fund allocation by value</h4>
+                    <p>Share of the account’s latest priced holdings.</p>
+                  </div>
+                  <button id="refresh-holdings-chart" class="button button-primary button-small" type="button">Refresh</button>
+                </div>
+                <p id="holdings-chart-message" class="chart-message">Loading current allocation…</p>
+                <div id="holdings-chart-content" class="holdings-chart-content" hidden>
+                  <div id="holdings-pie" class="holdings-pie" role="img"></div>
+                  <ul id="holdings-legend" class="holdings-legend"></ul>
+                </div>
+              </article>
+              <div id="holdings-table" class="table-wrap"></div>
+
+              <article class="form-card">
+                <div class="card-heading">
+                  <div>
+                    <h4>Add baseline</h4>
+                    <p>Use verified for trustee values and estimated when units are inferred.</p>
+                  </div>
+                </div>
+                <form id="baseline-form" class="stacked-form">
+                  <div class="field-grid field-grid-three">
+                    <label>Effective date<input name="effective_date" type="date" required /></label>
+                    <label>Source<input name="source" type="text" value="manual" maxlength="64" required /></label>
+                    <label>
+                      Status
+                      <select name="verification_status">
+                        <option value="VERIFIED">Verified</option>
+                        <option value="ESTIMATED">Estimated</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="repeat-heading">
+                    <strong>Funds and units</strong>
+                    <button class="text-button add-row" type="button" data-target="baseline-rows">+ Add fund</button>
+                  </div>
+                  <div id="baseline-rows" class="repeat-rows" data-kind="units"></div>
+                  <button class="button button-primary align-start" type="submit">Record baseline</button>
+                </form>
+              </article>
+            </section>
+
+            <section class="tab-panel" data-panel="allocations" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">Contribution routing</span>
+                  <h3>Allocation rules</h3>
+                  <p>A complete rule set must allocate exactly 100%.</p>
+                </div>
+              </div>
+              <div id="allocations-table" class="table-wrap"></div>
+
+              <article class="form-card">
+                <div class="card-heading">
+                  <div>
+                    <h4>Publish allocation</h4>
+                    <p>The previous active version for this stream ends automatically.</p>
+                  </div>
+                  <span id="allocation-total" class="total-badge">0%</span>
+                </div>
+                <form id="allocation-form" class="stacked-form">
+                  <div class="field-grid field-grid-three">
+                    <label>Contribution stream<input name="contribution_stream" type="text" value="regular" maxlength="32" required /></label>
+                    <label>Effective from<input name="effective_from" type="date" required /></label>
+                    <label>Effective to <span class="optional">optional</span><input name="effective_to" type="date" /></label>
+                  </div>
+                  <div class="repeat-heading">
+                    <strong>Fund weights</strong>
+                    <button class="text-button add-row" type="button" data-target="allocation-rows">+ Add fund</button>
+                  </div>
+                  <div id="allocation-rows" class="repeat-rows" data-kind="weight"></div>
+                  <button class="button button-primary align-start" type="submit">Publish allocation</button>
+                </form>
+              </article>
+            </section>
+
+            <section class="tab-panel" data-panel="plans" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">Scheduled cash flow</span>
+                  <h3>Contribution plans</h3>
+                  <p>Configure the expected monthly amount and contribution day.</p>
+                </div>
+              </div>
+              <div id="plans-table" class="table-wrap"></div>
+
+              <div class="panel-heading contribution-history-heading">
+                <div>
+                  <h3>Contribution history</h3>
+                  <p>Events appear after purchase processing runs.</p>
+                </div>
+                <button id="refresh-contribution-history" class="button button-primary button-small" type="button">Refresh history</button>
+              </div>
+              <div id="contribution-history-table" class="table-wrap"></div>
+
+              <article class="form-card">
+                <div class="card-heading">
+                  <div>
+                    <h4>Set contribution plan</h4>
+                    <p>The active plan for the same stream will be closed.</p>
+                  </div>
+                </div>
+                <form id="plan-form" class="stacked-form">
+                  <div class="field-grid field-grid-three">
+                    <label>Contribution stream<input name="contribution_stream" type="text" value="regular" maxlength="32" required /></label>
+                    <label>Monthly amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="1500.00" required /></label>
+                    <label>Expected day<input name="expected_day" type="number" min="1" max="31" value="10" required /></label>
+                    <label>Effective from<input name="effective_from" type="date" required /></label>
+                    <label>Effective to <span class="optional">optional</span><input name="effective_to" type="date" /></label>
+                  </div>
+                  <button class="button button-primary align-start" type="submit">Save contribution plan</button>
+                </form>
+              </article>
+            </section>
+
+            <section class="tab-panel" data-panel="reconcile" hidden>
+              <div class="panel-heading">
+                <div>
+                  <span class="eyebrow">Authoritative correction</span>
+                  <h3>Reconcile with eMPF</h3>
+                  <p>Record actual trustee units and preserve the earlier audit history.</p>
+                </div>
+              </div>
+              <article class="callout">
+                <strong>Use the trustee statement date.</strong>
+                <p>Reconciliation entries are always stored as verified and invalidate portfolio snapshots from that date.</p>
+              </article>
+              <div class="panel-heading">
+                <div>
+                  <h3>Reconciliation history</h3>
+                  <p>Verified balances recorded from trustee statements.</p>
+                </div>
+              </div>
+              <div id="reconciliations-table" class="table-wrap"></div>
+              <article class="form-card">
+                <form id="reconciliation-form" class="stacked-form">
+                  <div class="field-grid">
+                    <label>Effective date<input name="effective_date" type="date" required /></label>
+                    <label>Notes <span class="optional">optional</span><input name="notes" type="text" placeholder="eMPF statement reference" /></label>
+                  </div>
+                  <div class="repeat-heading">
+                    <strong>Verified fund units</strong>
+                    <button class="text-button add-row" type="button" data-target="reconciliation-rows">+ Add fund</button>
+                  </div>
+                  <div id="reconciliation-rows" class="repeat-rows" data-kind="units"></div>
+                  <button class="button button-danger align-start" type="submit">Record reconciliation</button>
+                </form>
+              </article>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

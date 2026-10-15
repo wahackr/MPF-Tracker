@@ -39,7 +39,6 @@ CREATE TABLE IF NOT EXISTS mpf.fund_prices (
     price_date DATE NOT NULL,
     bid NUMERIC(24, 10),
     offer NUMERIC(24, 10),
-    nav NUMERIC(24, 10),
     source TEXT NOT NULL,
     fetched_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -54,6 +53,15 @@ CREATE TABLE IF NOT EXISTS mpf.accounts (
     display_label TEXT NOT NULL,
     currency TEXT NOT NULL,
     active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mpf.reconciliation_records (
+    reconciliation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id UUID NOT NULL REFERENCES mpf.accounts(account_id) ON DELETE CASCADE,
+    effective_date DATE NOT NULL,
+    notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -154,11 +162,24 @@ CREATE TABLE IF NOT EXISTS mpf.snapshot_fund_values (
     UNIQUE (account_id, as_of_date, fund_id)
 );
 
+CREATE TABLE IF NOT EXISTS mpf.snapshot_invalidation_requests (
+    invalidation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_service TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    account_id UUID REFERENCES mpf.accounts(account_id) ON DELETE CASCADE,
+    from_date DATE,
+    to_date DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS mpf.jobs (
     job_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     service TEXT NOT NULL,
     job_type TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed')),
+    status TEXT NOT NULL CHECK (
+        status IN ('queued', 'running', 'succeeded', 'partial', 'failed')
+    ),
     idempotency_key TEXT NOT NULL,
     request JSONB NOT NULL DEFAULT '{}'::JSONB,
     result JSONB NOT NULL DEFAULT '{}'::JSONB,
@@ -181,22 +202,29 @@ CREATE INDEX IF NOT EXISTS idx_purchase_events_expected_date
     ON mpf.contribution_events(expected_date);
 CREATE INDEX IF NOT EXISTS idx_snapshots_as_of
     ON mpf.portfolio_snapshots(as_of_date);
+CREATE INDEX IF NOT EXISTS idx_snapshot_invalidation_requests_unprocessed
+    ON mpf.snapshot_invalidation_requests(processed_at, created_at);
 
-GRANT USAGE ON SCHEMA mpf TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
-GRANT CONNECT ON DATABASE mpf TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
+GRANT USAGE ON SCHEMA mpf TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}}, {{VALUATION_DB_USER}};
+GRANT CONNECT ON DATABASE {{POSTGRES_DB}} TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}}, {{VALUATION_DB_USER}};
 
-GRANT SELECT ON ALL TABLES IN SCHEMA mpf TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
+GRANT SELECT ON ALL TABLES IN SCHEMA mpf TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}}, {{VALUATION_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.funds, mpf.fund_aliases, mpf.fund_scheme_memberships, mpf.fund_prices
-TO mpf_crawler;
+TO {{CRAWLER_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.accounts, mpf.holdings_baselines, mpf.allocation_rules, mpf.contribution_plans
-TO mpf_portfolio;
+TO {{PORTFOLIO_DB_USER}};
+
+GRANT INSERT, UPDATE, DELETE ON mpf.reconciliation_records TO {{PORTFOLIO_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.contribution_events, mpf.purchase_transactions
-TO mpf_purchase;
+TO {{PURCHASE_DB_USER}};
 
 GRANT INSERT, UPDATE, DELETE ON mpf.portfolio_snapshots, mpf.snapshot_fund_values
-TO mpf_valuation;
+TO {{VALUATION_DB_USER}};
 
-GRANT INSERT, UPDATE, DELETE ON mpf.jobs TO mpf_crawler, mpf_portfolio, mpf_purchase, mpf_valuation;
+GRANT INSERT, UPDATE, DELETE ON mpf.jobs TO {{CRAWLER_DB_USER}};
+
+GRANT INSERT ON mpf.snapshot_invalidation_requests TO {{CRAWLER_DB_USER}}, {{PORTFOLIO_DB_USER}}, {{PURCHASE_DB_USER}};
+GRANT UPDATE, DELETE ON mpf.snapshot_invalidation_requests TO {{VALUATION_DB_USER}};

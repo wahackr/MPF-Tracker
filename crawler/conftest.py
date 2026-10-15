@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine, URL
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ENV_FILE = REPO_ROOT / ".env.example"
+COMPOSE_PROJECT = "mpf-itest"
+AUTOMATION_NETWORK = "automation"
+TEST_DB_USERS = {
+    "CRAWLER_DB_USER": "mpf_itest_crawler",
+    "PORTFOLIO_DB_USER": "mpf_itest_portfolio",
+    "PURCHASE_DB_USER": "mpf_itest_purchase",
+    "VALUATION_DB_USER": "mpf_itest_valuation",
+}
+
+
+@dataclass
+class ComposeHarness:
+    repo_root: Path
+    env: dict[str, str]
+    override_file: Path
+
+    def compose(self, args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+        cmd = [
+            "docker",
+            "compose",
+            "--env-file",
+            str(ENV_FILE),
+            "-f",
+            str(self.repo_root / "compose.yaml"),
+            "-f",
+            str(self.override_file),
+            *args,
+        ]
+        return subprocess.run(
+            cmd,
+            cwd=self.repo_root,
+            env=self.env,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    def api_request(
+        self,
+        *,
+        service_host: str,
+        method: str,
+        path: str,
+        payload: dict[str, Any] | None = None,
+    ) -> tuple[int, Any]:
+        script = r"""
+import json, os, urllib.request, urllib.error
+
+host = os.environ["TARGET_SERVICE_HOST"]
+method = os.environ["TARGET_METHOD"]
+path = os.environ["TARGET_PATH"]
+api_key = os.environ["TARGET_API_KEY"]
+payload_text = os.environ.get("TARGET_PAYLOAD")
+headers = {"X-API-Key": api_key}
+data = None
+if payload_text:
+    headers["Content-Type"] = "application/json"
+    data = payload_text.encode()
+request = urllib.request.Request(
+    f"http://{host}:8000{path}",
+    data=data,
+    headers=headers,
+    method=method,
+)
+try:
+    with urllib.request.urlopen(request, timeout=30) as response:
+        raw = response.read().decode()
+        body = json.loads(raw) if raw else {}
+        print(json.dumps({"status": response.status, "body": body}))
+except urllib.error.HTTPError as error:
+    raw = error.read().decode()
+    body = json.loads(raw) if raw else {"raw": raw}
+    print(json.dumps({"status": error.code, "body": body}))
+"""
+        exec_env_args = [
+            "-e",
+            f"TARGET_SERVICE_HOST={service_host}",
+            "-e",
+            f"TARGET_METHOD={method}",
+            "-e",
+            f"TARGET_PATH={path}",
+            "-e",
+            "TARGET_API_KEY=REPLACE_ME",
+        ]
+        if payload is not None:
+            exec_env_args.extend(["-e", f"TARGET_PAYLOAD={json.dumps(payload)}"])
+
+        cmd = [
+            "docker",
+            "compose",
+            "--env-file",
+            str(ENV_FILE),
+            "-f",
+            str(self.repo_root / "compose.yaml"),
+            "-f",
+            str(self.override_file),
+            "exec",
+            "-T",
+            *exec_env_args,
+            "mpf-crawler-worker",
+            "python",
+            "-c",
+            script,
+        ]
+        env = self.env.copy()
+
+        result = subprocess.run(
+            cmd,
+            cwd=self.repo_root,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        parsed = json.loads(result.stdout.strip())
+        return parsed["status"], parsed["body"]
+
+    def sql_scalar(self, query: str) -> str:
+        result = self.compose(
+            [
+                "exec",
+                "-T",
+                "mpf-db",
+                "psql",
+                "-U",
+                "mpf_migrator",
+                "-d",
+                "mpf",
+                "-Atc",
+                query,
+            ]
+        )
+        return result.stdout.strip()
+
+    def published_port(self, service: str, container_port: int) -> int:
+        result = self.compose(["port", service, str(container_port)])
+        address = result.stdout.strip().splitlines()[0]
+        return int(address.rsplit(":", 1)[1])
+
+
+def _ensure_docker_available() -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("docker CLI is required for integration tests")
+    try:
+        subprocess.run(
+            ["docker", "version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        pytest.skip(f"docker is not available: {exc}")
+
+
+def _ensure_automation_network() -> None:
+    inspect = subprocess.run(
+        ["docker", "network", "inspect", AUTOMATION_NETWORK],
+        capture_output=True,
+        text=True,
+    )
+    if inspect.returncode == 0:
+        return
+    subprocess.run(
+        ["docker", "network", "create", AUTOMATION_NETWORK],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _wait_for_health(harness: ComposeHarness) -> None:
+    required_services = ("mpf-crawler-api", "mpf-crawler-worker", "mpf-portfolio", "mpf-purchase", "mpf-valuation")
+    api_services = ("mpf-crawler-api", "mpf-portfolio", "mpf-purchase", "mpf-valuation")
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        ps = harness.compose(["ps", "-a"], check=False).stdout
+        if all(_service_healthy(ps, service) for service in required_services) and _migrate_finished(ps):
+            for service in api_services:
+                status, body = harness.api_request(
+                    service_host=service,
+                    method="GET",
+                    path="/health",
+                )
+                if status != 200 or body.get("status") != "ready":
+                    break
+            else:
+                return
+        time.sleep(2)
+    raise TimeoutError("Services did not become healthy in time")
+
+
+def _service_healthy(ps_output: str, service: str) -> bool:
+    for line in ps_output.splitlines():
+        if service in line:
+            return "healthy" in line.lower()
+    return False
+
+
+def _migrate_finished(ps_output: str) -> bool:
+    for line in ps_output.splitlines():
+        if "mpf-migrate" in line:
+            return "exited (0)" in line.lower()
+    return False
+
+
+@pytest.fixture(scope="session")
+def integration_harness() -> ComposeHarness:
+    _ensure_docker_available()
+    _ensure_automation_network()
+
+    env = os.environ.copy()
+    env["COMPOSE_PROJECT_NAME"] = COMPOSE_PROJECT
+    env["POSTGRES_BIND_ADDRESS"] = "127.0.0.1"
+    env["POSTGRES_HOST_PORT"] = "0"
+    env.update(TEST_DB_USERS)
+
+    with tempfile.TemporaryDirectory(prefix="mpf-itest-") as temporary_dir:
+        temporary_path = Path(temporary_dir)
+        override_file = temporary_path / "compose.override.yaml"
+        override_file.write_text(
+            "services:\n"
+            "  mpf-db:\n"
+            "    volumes:\n"
+            "      - postgres-test-data:/var/lib/postgresql/data\n"
+            "networks:\n"
+            "  mpf-internal:\n"
+            "    name: mpf-itest-internal\n"
+            "volumes:\n"
+            "  postgres-test-data:\n",
+            encoding="utf-8",
+        )
+        harness = ComposeHarness(repo_root=REPO_ROOT, env=env, override_file=override_file)
+        harness.compose(["down", "--volumes"], check=False)
+        try:
+            harness.compose(["up", "-d", "--build"])
+            _wait_for_health(harness)
+            yield harness
+        finally:
+            harness.compose(["down", "--volumes"], check=False)
+
+
+@pytest.fixture(scope="session")
+def crawler_pg_engine(integration_harness: ComposeHarness) -> Engine:
+    engine = create_engine(
+        URL.create(
+            "postgresql+psycopg",
+            username=integration_harness.env["CRAWLER_DB_USER"],
+            password="REPLACE_ME_CRAWLER_PASSWORD",
+            host="127.0.0.1",
+            port=integration_harness.published_port("mpf-db", 5432),
+            database="mpf",
+        ),
+        pool_pre_ping=True,
+    )
+    try:
+        yield engine
+    finally:
+        engine.dispose()

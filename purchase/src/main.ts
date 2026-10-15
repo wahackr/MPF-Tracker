@@ -19,6 +19,7 @@ type ConfirmTxInput = {
   trade_date?: string;
 };
 
+// Confirmation replaces the complete transaction set for the event.
 type ConfirmPayload = {
   trade_date: string;
   transactions: ConfirmTxInput[];
@@ -166,6 +167,7 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
       FROM mpf.contribution_events e
       JOIN mpf.contribution_plans p ON p.plan_id = e.plan_id
       WHERE e.event_id = $1::uuid
+      FOR UPDATE OF e
       `,
       [eventId]
     );
@@ -175,8 +177,24 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
       throw error;
     }
 
+    // Capture all previous dates before changing or deleting transactions. Unit
+    // changes affect every later snapshot, including those beyond the trade dates.
+    const previousTransactions = await client.query<{ trade_date: string }>(
+      "SELECT trade_date::text AS trade_date FROM mpf.purchase_transactions WHERE event_id = $1::uuid",
+      [eventId]
+    );
     let changedFromDate: string | null = null;
-    let changedToDate: string | null = null;
+    for (const { trade_date } of previousTransactions.rows) {
+      if (!changedFromDate || trade_date < changedFromDate) changedFromDate = trade_date;
+    }
+    await client.query(
+      `
+      DELETE FROM mpf.purchase_transactions
+      WHERE event_id = $1::uuid AND NOT (fund_id = ANY($2::text[]))
+      `,
+      [eventId, payload.transactions.map((tx) => tx.fund_id)]
+    );
+
     let confirmed = 0;
     for (const tx of payload.transactions) {
       if (!tx.fund_id || !tx.fund_id.trim()) {
@@ -201,7 +219,7 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
           status = 'CONFIRMED',
           estimation_policy = 'confirmed',
           updated_at = NOW()
-        RETURNING trade_date
+        RETURNING trade_date::text AS trade_date
         `,
         [eventId, tx.fund_id, tradeDate, cashAmount.toFixed(8), unitPrice.toFixed(10), unitsDelta.toFixed(10)]
       );
@@ -209,9 +227,6 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
       const txDate = rows.rows[0].trade_date as string;
       if (!changedFromDate || txDate < changedFromDate) {
         changedFromDate = txDate;
-      }
-      if (!changedToDate || txDate > changedToDate) {
-        changedToDate = txDate;
       }
     }
 
@@ -222,9 +237,9 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
         INSERT INTO mpf.snapshot_invalidation_requests (
           source_service, reason, account_id, from_date, to_date
         )
-        VALUES ('purchase', 'purchase_confirmation', $1::uuid, $2::date, $3::date)
+        VALUES ('purchase', 'purchase_confirmation', $1::uuid, $2::date, NULL)
         `,
-        [eventRows.rows[0].account_id as string, changedFromDate, changedToDate]
+        [eventRows.rows[0].account_id as string, changedFromDate]
       );
     }
 

@@ -77,7 +77,7 @@ Requirements: Docker Engine with Docker Compose v2 and outbound access to the pr
    curl --fail http://localhost:8004/health
    ```
 
-PostgreSQL data persists in `./data/postgres`. `docker compose down` stops and removes the stack's containers while retaining that directory. Follow crawler execution with `docker compose logs -f mpf-crawler-worker`.
+PostgreSQL data persists in `./data/postgres`. `docker compose down` stops and removes the stack's containers while retaining that directory. Changing `POSTGRES_PASSWORD` in `.env` does not update the password stored in an existing database; update the PostgreSQL role password to match before restarting migration. Exported shell variables also override `.env`; if test credentials were exported in your terminal, run `unset POSTGRES_PASSWORD` before `docker compose up -d` to use the configured password. Follow crawler execution with `docker compose logs -f mpf-crawler-worker`.
 
 ### Configuration
 
@@ -90,13 +90,13 @@ See [`.env.example`](./.env.example) for the complete Compose configuration.
 | `API_BIND_ADDRESS`, `*_API_HOST_PORT` | API host interfaces and ports; defaults to `0.0.0.0` and `8001`–`8004` |
 | `POSTGRES_BIND_ADDRESS`, `POSTGRES_HOST_PORT` | Published database interface and port; defaults to `0.0.0.0:5432` |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Database bootstrap/migration credentials |
-| `POSTGRES_HOST`, `POSTGRES_PORT` | Database address inside Compose; defaults to `mpf-db:5432` |
+| `POSTGRES_HOST`, `POSTGRES_PORT` | Connection for host-run migration commands; Compose containers always use `mpf-db:5432` |
 | `CRAWLER_DB_*`, `PORTFOLIO_DB_*`, `PURCHASE_DB_*`, `VALUATION_DB_*` | Separate database roles and passwords for each module |
 | `WORKER_POLL_INTERVAL_SECONDS` | Idle job polling interval; default `2` |
 | `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` | Worker lease duration and heartbeat interval; defaults to `90` and `15` |
 | `N8N_NETWORK` | Existing external Docker network; default `automation` |
 
-Compose maps the database settings into each application's `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
+Compose connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
 
 ## First-use workflow
 

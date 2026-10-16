@@ -33,9 +33,10 @@ function database(t, initialTransactions, { missingEvent = false } = {}) {
         assert.deepEqual(params, ["event-1"]);
         return { rows: missingEvent ? [] : [{ event_id: "event-1", account_id: "account-1" }] };
       }
-      if (statement.startsWith("SELECT trade_date::text")) {
+      if (statement.startsWith("SELECT MIN(trade_date)::text")) {
         assert.deepEqual(params, ["event-1"]);
-        return { rows: state.transactions.map(({ trade_date }) => ({ trade_date })) };
+        return { rows: [{ earliest_date: state.transactions.reduce((earliest, tx) =>
+          !earliest || tx.trade_date < earliest ? tx.trade_date : earliest, null) }] };
       }
       if (statement.startsWith("DELETE FROM mpf.purchase_transactions")) {
         assert.match(statement, /WHERE event_id = \$1::uuid AND NOT \(fund_id = ANY\(\$2::text\[\]\)\)/);
@@ -46,7 +47,6 @@ function database(t, initialTransactions, { missingEvent = false } = {}) {
       if (statement.startsWith("INSERT INTO mpf.purchase_transactions")) {
         assert.match(statement, /ON CONFLICT \(event_id, fund_id\)/);
         assert.match(statement, /status = 'CONFIRMED'/);
-        assert.match(statement, /RETURNING trade_date::text AS trade_date/);
         const [event_id, fund_id, trade_date, cash_amount, unit_price, units_delta] = params;
         const tx = { event_id, fund_id, trade_date, cash_amount, unit_price, units_delta, status: "CONFIRMED" };
         const index = state.transactions.findIndex((old) => old.fund_id === fund_id);
@@ -60,7 +60,7 @@ function database(t, initialTransactions, { missingEvent = false } = {}) {
         return { rows: [] };
       }
       if (statement.startsWith("INSERT INTO mpf.snapshot_invalidation_requests")) {
-        assert.match(statement, /VALUES \('purchase', 'purchase_confirmation', \$1::uuid, \$2::date, NULL\)/);
+        assert.match(statement, /VALUES \('purchase', 'purchase_confirmation', \$1::uuid, \$2::date\)/);
         state.invalidations.push({ account_id: params[0], from_date: params[1], to_date: null });
         return { rows: [] };
       }

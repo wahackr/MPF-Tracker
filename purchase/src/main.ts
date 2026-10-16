@@ -32,10 +32,13 @@ function toDecimal(value: string | number, field: string): Decimal {
   }
 }
 
-export async function processPurchases(payload: ProcessPayload): Promise<Record<string, unknown>> {
+export async function processPurchases(
+  payload: ProcessPayload,
+  runTransaction: typeof withTransaction = withTransaction
+): Promise<Record<string, unknown>> {
   const asOfDate = payload.as_of_date ?? hkToday();
   const accountId = payload.account_id;
-  const result = await withTransaction(async (client) => {
+  const result = await runTransaction(async (client) => {
     const plans = await loadPlansEffectiveOn(client, asOfDate, accountId);
 
     let processedEvents = 0;
@@ -44,8 +47,7 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
     let failedEvents = 0;
     let insertedTransactions = 0;
     let updatedTransactions = 0;
-    let changedFromDate: string | null = null;
-    let changedToDate: string | null = null;
+    const changedFromDates = new Map<string, string>();
     const waitingDetails: Array<{ event_id: string; reason: string }> = [];
 
     for (const plan of plans) {
@@ -119,11 +121,10 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
           } else {
             updatedTransactions += 1;
           }
-          if (!changedFromDate || allocation.trade_date < changedFromDate) {
-            changedFromDate = allocation.trade_date;
-          }
-          if (!changedToDate || allocation.trade_date > changedToDate) {
-            changedToDate = allocation.trade_date;
+          // Estimated trades are never earlier than the expected date, including before an update.
+          const previousDate = changedFromDates.get(plan.account_id);
+          if (!previousDate || expectedDate < previousDate) {
+            changedFromDates.set(plan.account_id, expectedDate);
           }
         }
       }
@@ -132,15 +133,15 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
       estimatedEvents += 1;
     }
 
-    if (changedFromDate) {
+    for (const [changedAccountId, changedFromDate] of changedFromDates) {
       await client.query(
         `
         INSERT INTO mpf.snapshot_invalidation_requests (
-          source_service, reason, account_id, from_date, to_date
+          source_service, reason, account_id, from_date
         )
-        VALUES ('purchase', 'purchase_estimation', $1::uuid, $2::date, $3::date)
+        VALUES ('purchase', 'purchase_estimation', $1::uuid, $2::date)
         `,
-        [accountId ?? null, changedFromDate, changedToDate]
+        [changedAccountId, changedFromDate]
       );
     }
 
@@ -158,8 +159,12 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
   return result;
 }
 
-export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayload): Promise<Record<string, unknown>> {
-  return withTransaction(async (client) => {
+export async function confirmPurchaseEvent(
+  eventId: string,
+  payload: ConfirmPayload,
+  runTransaction: typeof withTransaction = withTransaction
+): Promise<Record<string, unknown>> {
+  return runTransaction(async (client) => {
     const eventRows = await client.query(
       `
       SELECT e.event_id, p.account_id
@@ -175,8 +180,11 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
       throw error;
     }
 
-    let changedFromDate: string | null = null;
-    let changedToDate: string | null = null;
+    const priorDates = await client.query<{ earliest_date: string | null }>(
+      "SELECT MIN(trade_date)::text AS earliest_date FROM mpf.purchase_transactions WHERE event_id = $1::uuid",
+      [eventId]
+    );
+    let changedFromDate = priorDates.rows[0]?.earliest_date ?? null;
     let confirmed = 0;
     for (const tx of payload.transactions) {
       if (!tx.fund_id || !tx.fund_id.trim()) {
@@ -186,7 +194,7 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
       const unitPrice = toDecimal(tx.unit_price, "transactions[].unit_price");
       const unitsDelta = toDecimal(tx.units_delta, "transactions[].units_delta");
       const tradeDate = tx.trade_date ?? payload.trade_date;
-      const rows = await client.query(
+      await client.query(
         `
         INSERT INTO mpf.purchase_transactions (
           event_id, fund_id, trade_date, cash_amount, unit_price, units_delta, status, estimation_policy
@@ -201,17 +209,12 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
           status = 'CONFIRMED',
           estimation_policy = 'confirmed',
           updated_at = NOW()
-        RETURNING trade_date
         `,
         [eventId, tx.fund_id, tradeDate, cashAmount.toFixed(8), unitPrice.toFixed(10), unitsDelta.toFixed(10)]
       );
       confirmed += 1;
-      const txDate = rows.rows[0].trade_date as string;
-      if (!changedFromDate || txDate < changedFromDate) {
-        changedFromDate = txDate;
-      }
-      if (!changedToDate || txDate > changedToDate) {
-        changedToDate = txDate;
+      if (!changedFromDate || tradeDate < changedFromDate) {
+        changedFromDate = tradeDate;
       }
     }
 
@@ -220,11 +223,11 @@ export async function confirmPurchaseEvent(eventId: string, payload: ConfirmPayl
       await client.query(
         `
         INSERT INTO mpf.snapshot_invalidation_requests (
-          source_service, reason, account_id, from_date, to_date
+          source_service, reason, account_id, from_date
         )
-        VALUES ('purchase', 'purchase_confirmation', $1::uuid, $2::date, $3::date)
+        VALUES ('purchase', 'purchase_confirmation', $1::uuid, $2::date)
         `,
-        [eventRows.rows[0].account_id as string, changedFromDate, changedToDate]
+        [eventRows.rows[0].account_id as string, changedFromDate]
       );
     }
 

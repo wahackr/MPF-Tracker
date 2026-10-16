@@ -12,6 +12,7 @@ from sqlalchemy.engine import Connection
 
 from ..http_client import FetchResult, ProviderHttpError, request_with_retry
 from ..pgsql.main import begin_connection
+from ..snapshots import invalidate_price_snapshots
 
 
 class ParseError(ValueError):
@@ -266,6 +267,7 @@ def save_records(
     inserted = updated = unchanged = 0
     min_changed_date: date | None = None
     max_changed_date: date | None = None
+    changed_funds: dict[str, date] = {}
 
     with begin_connection(pg_engine) as pg_connection:
         for record in records:
@@ -302,6 +304,9 @@ def save_records(
                 unchanged += 1
                 continue
 
+            changed_funds[fund_id] = min(
+                changed_funds.get(fund_id, record.price_date), record.price_date
+            )
             if row["inserted"]:
                 inserted += 1
             else:
@@ -311,6 +316,8 @@ def save_records(
                 min_changed_date = record.price_date
             if max_changed_date is None or record.price_date > max_changed_date:
                 max_changed_date = record.price_date
+
+        invalidate_price_snapshots(pg_connection, changed_funds)
 
         return {
             "inserted": inserted,
@@ -405,9 +412,21 @@ def _try_parse_decimal(value: str) -> Decimal | None:
 
 
 def _manulife_request_headers() -> dict[str, str]:
+    # Manulife's edge returns 403 for the generic API profile but accepts this
+    # browser navigation profile for both the funds list and fund history.
     return {
-        "Accept": "application/json, text/plain, */*",
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,image/apng,*/*;q=0.8"
+        ),
         "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "en-US",
+        "Cache-Control": "max-age=0",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "

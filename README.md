@@ -323,3 +323,5 @@ job on every push and pull request. A failure fails the workflow:
 ```
 
 Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs the Python suite including live checks, all four TypeScript suites, and then Docker integration tests on pushes and pull requests.
+
+To run both providers' live endpoint checks on demand, open the [Live Provider Endpoints workflow](./.github/workflows/live-endpoints.yml) in GitHub Actions and choose **Run workflow**. It has no schedule. GitHub shows this manual trigger after the workflow file reaches the default branch.

@@ -312,7 +312,7 @@ Integration tests require Docker and access to build images; the harness skips t
 
 Live crawler smoke tests call real provider endpoints. They run with the Python
 suite on every push and pull request. The Manulife tests also run as a separate
-job on every push and pull request, and daily. A failure fails the workflow:
+job on every push and pull request. A failure fails the workflow:
 
 ```bash
 .venv/bin/python -m pytest -q -m live

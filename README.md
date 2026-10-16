@@ -77,7 +77,7 @@ Requirements: Docker Engine with Docker Compose v2 and outbound access to the pr
    curl --fail http://localhost:8004/health
    ```
 
-PostgreSQL data persists in `./data/postgres`. `docker compose down` stops and removes the stack's containers while retaining that directory. Follow crawler execution with `docker compose logs -f mpf-crawler-worker`.
+PostgreSQL data persists in `./data/postgres`. `docker compose down` stops and removes the stack's containers while retaining that directory. Changing `POSTGRES_PASSWORD` in `.env` does not update the password stored in an existing database; update the PostgreSQL role password to match before restarting migration. Exported shell variables also override `.env`; if test credentials were exported in your terminal, run `unset POSTGRES_PASSWORD` before `docker compose up -d` to use the configured password. Follow crawler execution with `docker compose logs -f mpf-crawler-worker`.
 
 ### Configuration
 
@@ -90,13 +90,13 @@ See [`.env.example`](./.env.example) for the complete Compose configuration.
 | `API_BIND_ADDRESS`, `*_API_HOST_PORT` | API host interfaces and ports; defaults to `0.0.0.0` and `8001`–`8004` |
 | `POSTGRES_BIND_ADDRESS`, `POSTGRES_HOST_PORT` | Published database interface and port; defaults to `0.0.0.0:5432` |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Database bootstrap/migration credentials |
-| `POSTGRES_HOST`, `POSTGRES_PORT` | Database address inside Compose; defaults to `mpf-db:5432` |
+| `POSTGRES_HOST`, `POSTGRES_PORT` | Connection for host-run migration commands; Compose containers always use `mpf-db:5432` |
 | `CRAWLER_DB_*`, `PORTFOLIO_DB_*`, `PURCHASE_DB_*`, `VALUATION_DB_*` | Separate database roles and passwords for each module |
 | `WORKER_POLL_INTERVAL_SECONDS` | Idle job polling interval; default `2` |
 | `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` | Worker lease duration and heartbeat interval; defaults to `90` and `15` |
 | `N8N_NETWORK` | Existing external Docker network; default `automation` |
 
-Compose maps the database settings into each application's `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
+Compose connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
 
 ## First-use workflow
 
@@ -215,7 +215,7 @@ Confirmation submits the complete transaction set for an event, including when c
 ├── portfolio/
 │   ├── public/                  # Browser dashboard: HTML, CSS, JavaScript
 │   └── src/                     # Express routes, account rules, unit tests
-├── purchase/src/                # Purchase estimation, confirmation, unit tests
+├── purchase/src/                # Purchase estimation, confirmation, Jest tests
 ├── valuation/src/               # Valuation, snapshots, unit tests
 ├── migrations/sql/              # Shared schema and database grants
 ├── scripts/migrate.py           # Role setup and SQL migration runner
@@ -310,11 +310,9 @@ Python provider tests use saved responses under `mpf-codex-handoff/fixtures` and
 .venv/bin/python -m pytest -q -m integration
 ```
 
-Integration tests require Docker and access to build images; the harness skips them if Docker is unavailable. Its API ports come from the Compose defaults, so stop a development stack occupying ports `8001`–`8004` before running it.
+Integration tests require Docker and access to build images; the harness skips them if Docker is unavailable. The test stack uses temporary host ports, so it can run alongside a development stack.
 
-Live crawler smoke tests call real provider endpoints. They run with the Python
-suite on every push and pull request. The Manulife tests also run as a separate
-job on every push and pull request. A failure fails the workflow:
+Live crawler smoke tests call real provider endpoints:
 
 ```bash
 .venv/bin/python -m pytest -q -m live
@@ -324,6 +322,40 @@ job on every push and pull request. A failure fails the workflow:
   crawler/worker/src/__tests__/live/test_hsbc_live.py
 ```
 
-Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs the Python suite including live checks, all four TypeScript suites, and then Docker integration tests on pushes and pull requests.
+Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs suites one at a time on pushes and pull requests: Python crawler worker (including integration and live tests), crawler API, portfolio, purchase, then valuation. Each suite must pass before the next starts. CI checks Docker availability first, and each TypeScript service's `npm test` shell script creates, migrates, and removes its own temporary PostgreSQL database.
+
+CI prints per-file coverage for the Python worker and for TypeScript modules
+loaded by each service's unit tests. Crawler API, portfolio, purchase, and valuation use Jest coverage across all source modules. Python coverage includes integration and
+live tests. Node's built-in coverage report omits modules that the unit tests
+never load; requests made to running TypeScript services by the Docker
+integration tests are not included in those TypeScript percentages.
 
 To run both providers' live endpoint checks on demand, open the [Live Provider Endpoints workflow](./.github/workflows/live-endpoints.yml) in GitHub Actions and choose **Run workflow**. It has no schedule. GitHub shows this manual trigger after the workflow file reaches the default branch.
+
+Crawler API, portfolio, purchase, and valuation use Jest with real PostgreSQL integration tests.
+Run `npm ci` and `npm test` inside any of those service folders (`crawler/api`, `portfolio`, `purchase`, or `valuation`), for example:
+
+```bash
+cd portfolio
+npm ci
+npm test
+```
+
+The script starts a temporary PostgreSQL 17 container on an available local port, creates the
+service roles, applies the project SQL migrations, and removes the container after the run,
+including when tests fail. Docker must be installed and running; no local Python setup is needed.
+
+`npm run test:unit` runs only unit and HTTP tests without PostgreSQL.
+`npm run test:integration` provisions the same temporary database and runs only database tests.
+`npm run test:all` is an alias for `npm test`.
+
+To reuse an existing isolated database, set `TEST_DATABASE_URL` and the service's password variable:
+`CRAWLER_DB_PASSWORD`, `PORTFOLIO_DB_PASSWORD`, `PURCHASE_DB_PASSWORD`, or `VALUATION_DB_PASSWORD`.
+That database must already have migrations applied and the corresponding `mpf_crawler`, `mpf_portfolio`,
+`mpf_purchase`, or `mpf_valuation` role available;
+the script leaves it running. Tests insert committed dummy rows, call the real purchase functions,
+and verify saved results through a separate connection. Each test deletes its own fixtures afterward.
+CI runs the same `npm test` commands sequentially, with a separate temporary database for each service.
+
+Purchase operations own one transaction and execute SQL directly;
+estimation and confirmation batch their writes rather than issuing queries inside fund loops.

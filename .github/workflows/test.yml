@@ -5,51 +5,66 @@ on:
   pull_request:
 
 jobs:
-  python:
+  tests:
+    name: Sequential test suites
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: python -m pip install -r requirements.txt -r crawler/worker/requirements.txt
-      - run: python -m pytest -q -m "not integration"
 
-  typescript:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service: [crawler/api, portfolio, purchase, valuation]
-    steps:
-      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: ${{ matrix.service }}/package-lock.json
-      - run: npm ci
-        working-directory: ${{ matrix.service }}
-      - run: npm test
-        working-directory: ${{ matrix.service }}
+          cache-dependency-path: |
+            crawler/api/package-lock.json
+            portfolio/package-lock.json
+            purchase/package-lock.json
+            valuation/package-lock.json
 
-  integration:
-    runs-on: ubuntu-latest
-    needs: [python, typescript]
-    steps:
-      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: python -m pip install -r requirements.txt -r crawler/worker/requirements.txt
-      - run: python -m pytest -q -m integration
 
-  manulife-live:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: python -m pip install -r requirements.txt -r crawler/worker/requirements.txt
-      - run: python -m pytest -q -ra crawler/worker/src/__tests__/live/test_manulife_live.py
+      - name: Check Docker
+        run: |
+          docker info > /dev/null
+          docker compose version
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements.txt -r crawler/worker/requirements.txt
+
+      # Each suite must pass before the next suite starts.
+      - name: Test crawler worker (Python)
+        run: python -m pytest -q -ra --cov=crawler/worker/src --cov-branch --cov-report=term-missing
+
+      - name: Install crawler API dependencies
+        run: npm ci
+        working-directory: crawler/api
+
+      - name: Test crawler API
+        run: npm test
+        working-directory: crawler/api
+
+      - name: Install portfolio dependencies
+        run: npm ci
+        working-directory: portfolio
+
+      - name: Test portfolio
+        run: npm test
+        working-directory: portfolio
+
+      - name: Install purchase dependencies
+        run: npm ci
+        working-directory: purchase
+
+      - name: Test purchase
+        run: npm test
+        working-directory: purchase
+
+      - name: Install valuation dependencies
+        run: npm ci
+        working-directory: valuation
+
+      - name: Test valuation
+        run: npm test
+        working-directory: valuation

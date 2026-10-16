@@ -88,7 +88,14 @@ export function registerPlansRoutes(router: Router): void {
         return;
       }
       const result = await withTransaction(async (client) => {
-        await ensureAccountExists(req.params.accountId);
+        // Validate the account on this transaction's connection.
+        const account = await client.query("SELECT 1 FROM mpf.accounts WHERE account_id = $1::uuid", [req.params.accountId]);
+        if (account.rows.length === 0) {
+          const error = new Error("Account not found");
+          (error as Error & { status?: number }).status = 404;
+          throw error;
+        }
+
         await client.query(
           `
           UPDATE mpf.contribution_plans

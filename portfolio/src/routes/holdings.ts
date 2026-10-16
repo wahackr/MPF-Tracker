@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { query, withTransaction } from "../libs/db.js";
-import { BaselineSchema, ensureAccountExists, ensureFundExists } from "../libs/portfolio.js";
+import { BaselineSchema, ensureAccountExists } from "../libs/portfolio.js";
 import { decimalString } from "../libs/rules.js";
 
 export function registerHoldingsRoutes(router: Router): void {
@@ -38,26 +38,31 @@ export function registerHoldingsRoutes(router: Router): void {
     try {
       const payload = BaselineSchema.parse(req.body ?? {});
       await withTransaction(async (client) => {
-        await ensureAccountExists(req.params.accountId);
-        for (const holding of payload.holdings) {
-          await ensureFundExists(client, holding.fund_id);
-          await client.query(
-            `
-            INSERT INTO mpf.holdings_baselines (
-              account_id, fund_id, effective_date, units, source, verification_status
-            )
-            VALUES ($1::uuid, $2, $3::date, $4::numeric, $5, $6)
-            `,
-            [
-              req.params.accountId,
-              holding.fund_id,
-              payload.effective_date,
-              decimalString(holding.units),
-              payload.source,
-              payload.verification_status
-            ]
-          );
+        // Validate the account on this transaction's connection.
+        const account = await client.query("SELECT 1 FROM mpf.accounts WHERE account_id = $1::uuid", [req.params.accountId]);
+        if (account.rows.length === 0) {
+          const error = new Error("Account not found");
+          (error as Error & { status?: number }).status = 404;
+          throw error;
         }
+
+        // Validate funds together, then insert all balances in one statement.
+        const holdings = payload.holdings.map((holding) => ({
+          fund_id: holding.fund_id,
+          units: decimalString(holding.units)
+        }));
+        const funds = await client.query("SELECT fund_id FROM mpf.funds WHERE fund_id = ANY($1::text[])", [holdings.map((holding) => holding.fund_id)]);
+        const knownFunds = new Set(funds.rows.map((fund) => fund.fund_id));
+        const missing = holdings.find((holding) => !knownFunds.has(holding.fund_id));
+        if (missing) throw new Error(`Fund not found: ${missing.fund_id}`);
+
+        await client.query(
+          `INSERT INTO mpf.holdings_baselines (account_id, fund_id, effective_date, units, source, verification_status)
+           SELECT $1::uuid, fund_id, $2::date, units, $3, $4
+           FROM jsonb_to_recordset($5::jsonb) AS h(fund_id text, units numeric)`,
+          [req.params.accountId, payload.effective_date, payload.source, payload.verification_status, JSON.stringify(holdings)]
+        );
+
         await client.query(
           `
           INSERT INTO mpf.snapshot_invalidation_requests (

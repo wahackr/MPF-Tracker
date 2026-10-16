@@ -67,10 +67,3 @@ export async function ensureAccountExists(accountId: string): Promise<void> {
     throw error;
   }
 }
-
-export async function ensureFundExists(client: { query: typeof query }, fundId: string): Promise<void> {
-  const result = await client.query("SELECT 1 FROM mpf.funds WHERE fund_id = $1", [fundId]);
-  if (result.rows.length === 0) {
-    throw new Error(`Fund not found: ${fundId}`);
-  }
-}

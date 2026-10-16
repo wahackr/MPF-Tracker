@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test src/__tests__/unit/*.test.mjs",
-    "start": "node dist/index.js"
+    "build": "node --input-type=module -e 'import { rmSync } from \"node:fs\"; rmSync(\"dist\", { recursive: true, force: true });' && tsc -p tsconfig.json",
+    "test": "bash scripts/test.sh",
+    "start": "node dist/index.js",
+    "test:integration": "bash scripts/test.sh --selectProjects integration",
+    "test:all": "npm test",
+    "test:unit": "npm run build && node --experimental-vm-modules node_modules/jest/bin/jest.js --selectProjects unit --coverage --runInBand"
   },
   "dependencies": {
     "express": "^4.21.2",
@@ -15,8 +18,10 @@
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
-    "@types/pg": "^8.11.10",
     "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "jest": "^30.5.2",
+    "supertest": "^7.3.1",
     "typescript": "^5.7.2"
   }
 }

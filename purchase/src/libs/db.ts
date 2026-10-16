@@ -39,3 +39,8 @@ export async function healthCheck(): Promise<boolean> {
     return false;
   }
 }
+
+// Release idle connections when a test suite or service shuts down.
+export async function closeDatabase(): Promise<void> {
+  await pool.end();
+}

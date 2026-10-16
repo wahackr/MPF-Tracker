@@ -1,209 +1,103 @@
 import { query, withTransaction } from "./db.js";
-import type { HoldingRow } from "./rules.js";
 import type { CalculationResult } from "../main.js";
 
-export async function loadHoldings(asOfDate: string, accountId?: string): Promise<HoldingRow[]> {
-  const params: unknown[] = [asOfDate];
-  let accountFilter = "";
-  if (accountId) {
-    accountFilter = "AND hb.account_id = $2::uuid";
-    params.push(accountId);
-  }
-  const rows = await query<HoldingRow>(
-    `
-    WITH latest_baselines AS (
-      SELECT
-        hb.account_id,
-        hb.fund_id,
-        hb.effective_date,
-        hb.units,
-        hb.verification_status,
-        ROW_NUMBER() OVER (
-          PARTITION BY hb.account_id, hb.fund_id
-          ORDER BY hb.effective_date DESC, hb.created_at DESC, hb.baseline_id DESC
-        ) AS rn
-      FROM mpf.holdings_baselines hb
-      WHERE hb.effective_date <= $1::date
-        ${accountFilter}
-    )
-    SELECT
-      b.account_id::text,
-      b.fund_id,
-      b.effective_date::text,
-      b.units::text,
-      b.verification_status,
-      COALESCE(SUM(CASE WHEN pt.status = 'CONFIRMED' THEN pt.units_delta ELSE 0 END), 0)::text AS confirmed_delta,
-      COALESCE(SUM(CASE WHEN pt.status = 'ESTIMATED' THEN pt.units_delta ELSE 0 END), 0)::text AS estimated_delta
-    FROM latest_baselines b
-    LEFT JOIN mpf.contribution_plans cp ON cp.account_id = b.account_id
-    LEFT JOIN mpf.contribution_events ce ON ce.plan_id = cp.plan_id
-    LEFT JOIN mpf.purchase_transactions pt
-      ON pt.event_id = ce.event_id
-      AND pt.fund_id = b.fund_id
-      AND pt.trade_date > b.effective_date
-      AND pt.trade_date <= $1::date
-    WHERE b.rn = 1
-    GROUP BY b.account_id, b.fund_id, b.effective_date, b.units, b.verification_status
-    ORDER BY b.account_id, b.fund_id
-    `,
-    params
-  );
-  return rows.rows as HoldingRow[];
-}
-
-export async function loadLatestPrice(fundId: string, asOfDate: string): Promise<{
-  price_date: string;
-  price: string;
-  price_type: string;
-} | null> {
-  const row = await query<{ price_date: string; price: string | null; price_type: string }>(
-    `
-    SELECT
-      fp.price_date::text,
-      fp.bid::text AS price,
-      CASE
-        WHEN fp.bid IS NOT NULL THEN 'BID'
-        WHEN fp.offer IS NOT NULL THEN 'OFFER'
-        ELSE 'UNKNOWN'
-      END AS price_type
-    FROM mpf.fund_prices fp
-    WHERE fp.fund_id = $1
-      AND fp.price_date <= $2::date
-    ORDER BY fp.price_date DESC
-    LIMIT 1
-    `,
-    [fundId, asOfDate]
-  );
-  if (row.rows.length === 0 || row.rows[0].price === null) {
-    return null;
-  }
-  return row.rows[0] as { price_date: string; price: string; price_type: string };
-}
-
 export async function persistSnapshot(calculation: CalculationResult): Promise<{ saved_accounts: number }> {
-  return withTransaction(async (client) => {
-    let saved = 0;
-    for (const account of calculation.accounts) {
-      await client.query(
-        `
-        INSERT INTO mpf.portfolio_snapshots (
-          account_id, as_of_date, total_value, currency, calculation_status, calculated_at, revision, stale
-        )
-        VALUES ($1::uuid, $2::date, $3::numeric, $4, $5, NOW(), 1, $6)
-        ON CONFLICT (account_id, as_of_date)
-        DO UPDATE SET
-          total_value = EXCLUDED.total_value,
-          currency = EXCLUDED.currency,
-          calculation_status = EXCLUDED.calculation_status,
-          calculated_at = NOW(),
-          stale = EXCLUDED.stale,
-          revision = mpf.portfolio_snapshots.revision + 1,
-          updated_at = NOW()
-        `,
-        [
-          account.account_id,
-          calculation.requested_as_of,
-          account.total_value,
-          account.currency,
-          account.calculation_status,
-          ["STALE", "PARTIAL"].includes(account.calculation_status)
-        ]
-      );
+  if (calculation.accounts.length === 0) return { saved_accounts: 0 };
 
-      await client.query(
-        `DELETE FROM mpf.snapshot_fund_values WHERE account_id = $1::uuid AND as_of_date = $2::date`,
-        [account.account_id, calculation.requested_as_of]
-      );
-      for (const fund of account.funds) {
-        await client.query(
-          `
-          INSERT INTO mpf.snapshot_fund_values (
-            account_id, as_of_date, fund_id, units, price_date, price_used, value, price_status, units_status
-          )
-          VALUES ($1::uuid, $2::date, $3, $4::numeric, $5::date, $6::numeric, $7::numeric, $8, $9)
-          `,
-          [
-            account.account_id,
-            calculation.requested_as_of,
-            fund.fund_id,
-            fund.units,
-            fund.price_date,
-            fund.price,
-            fund.market_value,
-            fund.price_status,
-            fund.units_status
-          ]
-        );
-      }
-      saved += 1;
-    }
-    return { saved_accounts: saved };
+  return withTransaction(async (client) => {
+    // Save all account totals together, increasing each existing snapshot's revision.
+    const accounts = calculation.accounts.map((account) => ({
+      account_id: account.account_id,
+      total_value: account.total_value,
+      currency: account.currency,
+      calculation_status: account.calculation_status,
+      stale: ["STALE", "PARTIAL"].includes(account.calculation_status)
+    }));
+
+    await client.query(
+      `INSERT INTO mpf.portfolio_snapshots (
+         account_id, as_of_date, total_value, currency, calculation_status, calculated_at, revision, stale
+       )
+       SELECT account_id, $2::date, total_value, currency, calculation_status, NOW(), 1, stale
+       FROM jsonb_to_recordset($1::jsonb) AS a(
+         account_id uuid, total_value numeric, currency text, calculation_status text, stale boolean
+       )
+       ON CONFLICT (account_id, as_of_date) DO UPDATE SET
+         total_value = EXCLUDED.total_value, currency = EXCLUDED.currency,
+         calculation_status = EXCLUDED.calculation_status, calculated_at = NOW(),
+         stale = EXCLUDED.stale, revision = mpf.portfolio_snapshots.revision + 1, updated_at = NOW()`,
+      [JSON.stringify(accounts), calculation.requested_as_of]
+    );
+
+    // Replace the complete fund set for these accounts and this date in the same transaction.
+    await client.query(
+      "DELETE FROM mpf.snapshot_fund_values WHERE account_id = ANY($1::uuid[]) AND as_of_date = $2::date",
+      [accounts.map((account) => account.account_id), calculation.requested_as_of]
+    );
+
+    const funds = calculation.accounts.flatMap((account) => account.funds.map((fund) => ({
+      account_id: account.account_id,
+      fund_id: fund.fund_id,
+      units: fund.units,
+      price_date: fund.price_date,
+      price_used: fund.price,
+      value: fund.market_value,
+      price_status: fund.price_status,
+      units_status: fund.units_status
+    })));
+
+    await client.query(
+      `INSERT INTO mpf.snapshot_fund_values (
+         account_id, as_of_date, fund_id, units, price_date, price_used, value, price_status, units_status
+       )
+       SELECT account_id, $2::date, fund_id, units, price_date, price_used, value, price_status, units_status
+       FROM jsonb_to_recordset($1::jsonb) AS f(
+         account_id uuid, fund_id text, units numeric, price_date date, price_used numeric,
+         value numeric, price_status text, units_status text
+       )`,
+      [JSON.stringify(funds), calculation.requested_as_of]
+    );
+
+    return { saved_accounts: accounts.length };
   });
 }
 
 export async function applyPendingInvalidations(accountId?: string): Promise<number> {
   return withTransaction(async (client) => {
-    const params: unknown[] = [];
-    let accountFilter = "";
-    if (accountId) {
-      accountFilter = "AND account_id = $1::uuid";
-      params.push(accountId);
-    }
-    const rows = await client.query(
-      `
-      SELECT invalidation_id::text, account_id::text, from_date::text, to_date::text
-      FROM mpf.snapshot_invalidation_requests
-      WHERE processed_at IS NULL
-        ${accountFilter}
-      ORDER BY created_at ASC
-      FOR UPDATE SKIP LOCKED
-      `,
-      params
-    );
-    if (rows.rows.length === 0) {
-      return 0;
-    }
-
-    for (const row of rows.rows as Array<{
+    // Lock pending requests so another worker cannot process the same batch concurrently.
+    const requests = (await client.query<{
       invalidation_id: string;
       account_id: string | null;
       from_date: string | null;
       to_date: string | null;
-    }>) {
-      const where: string[] = ["TRUE"];
-      const whereParams: unknown[] = [];
-      let i = 1;
-      if (row.account_id) {
-        where.push(`account_id = $${i++}::uuid`);
-        whereParams.push(row.account_id);
-      }
-      if (row.from_date) {
-        where.push(`as_of_date >= $${i++}::date`);
-        whereParams.push(row.from_date);
-      }
-      if (row.to_date) {
-        where.push(`as_of_date <= $${i++}::date`);
-        whereParams.push(row.to_date);
-      }
-      await client.query(
-        `
-        UPDATE mpf.portfolio_snapshots
-        SET stale = TRUE, updated_at = NOW()
-        WHERE ${where.join(" AND ")}
-        `,
-        whereParams
-      );
-    }
+    }>(
+      `SELECT invalidation_id::text, account_id::text, from_date::text, to_date::text
+       FROM mpf.snapshot_invalidation_requests
+       WHERE processed_at IS NULL AND ($1::uuid IS NULL OR account_id = $1::uuid)
+       ORDER BY created_at FOR UPDATE SKIP LOCKED`,
+      [accountId ?? null]
+    )).rows;
+
+    if (requests.length === 0) return 0;
+
+    // Apply all account/date ranges together; null fields intentionally leave that bound open.
+    await client.query(
+      `UPDATE mpf.portfolio_snapshots s SET stale = TRUE, updated_at = NOW()
+       WHERE EXISTS (
+         SELECT 1 FROM jsonb_to_recordset($1::jsonb) AS r(account_id uuid, from_date date, to_date date)
+         WHERE (r.account_id IS NULL OR s.account_id = r.account_id)
+           AND (r.from_date IS NULL OR s.as_of_date >= r.from_date)
+           AND (r.to_date IS NULL OR s.as_of_date <= r.to_date)
+       )`,
+      [JSON.stringify(requests)]
+    );
 
     await client.query(
-      `
-      UPDATE mpf.snapshot_invalidation_requests
-      SET processed_at = NOW()
-      WHERE invalidation_id = ANY($1::uuid[])
-      `,
-      [rows.rows.map((row: { invalidation_id: string }) => row.invalidation_id)]
+      "UPDATE mpf.snapshot_invalidation_requests SET processed_at = NOW() WHERE invalidation_id = ANY($1::uuid[])",
+      [requests.map((request) => request.invalidation_id)]
     );
-    return rows.rows.length;
+
+    return requests.length;
   });
 }
 

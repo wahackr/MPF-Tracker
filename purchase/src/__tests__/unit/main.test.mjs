@@ -105,7 +105,8 @@ for (const [oldDate, newDate, expectedStart] of [
         if (sql.includes("MIN(trade_date)")) {
           return { rows: [{ earliest_date: oldDate }] };
         }
-        if (sql.includes("INSERT INTO mpf.purchase_transactions") ||
+        if (sql.includes("DELETE FROM mpf.purchase_transactions") ||
+            sql.includes("INSERT INTO mpf.purchase_transactions") ||
             sql.includes("UPDATE mpf.contribution_events") ||
             sql.includes("INSERT INTO mpf.snapshot_invalidation_requests")) {
           return { rows: [] };
@@ -127,3 +128,38 @@ for (const [oldDate, newDate, expectedStart] of [
     assert.doesNotMatch(invalidation.sql, /to_date/);
   });
 }
+
+test("confirmation removes funds absent from the actual transactions", async () => {
+  const calls = [];
+  const client = {
+    query: async (sql, params) => {
+      calls.push({ sql, params });
+      if (sql.includes("FROM mpf.contribution_events e")) {
+        return { rows: [{ event_id: "event-1", account_id: "account-1" }] };
+      }
+      if (sql.includes("MIN(trade_date)")) {
+        return { rows: [{ earliest_date: "2026-10-08" }] };
+      }
+      if (sql.includes("DELETE FROM mpf.purchase_transactions") ||
+          sql.includes("INSERT INTO mpf.purchase_transactions") ||
+          sql.includes("UPDATE mpf.contribution_events") ||
+          sql.includes("INSERT INTO mpf.snapshot_invalidation_requests")) {
+        return { rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    }
+  };
+
+  await confirmPurchaseEvent("event-1", {
+    trade_date: "2026-10-12",
+    transactions: [{ fund_id: "fund-a", cash_amount: "100", unit_price: "2", units_delta: "50" }]
+  }, async (work) => work(client));
+
+  assert.match(calls[0].sql, /FOR UPDATE OF e/);
+  const deletion = calls.find(({ sql }) => sql.includes("DELETE FROM mpf.purchase_transactions"));
+  assert.ok(deletion);
+  assert.match(deletion.sql, /NOT \(fund_id = ANY\(\$2::text\[\]\)\)/);
+  assert.deepEqual(deletion.params, ["event-1", ["fund-a"]]);
+  const invalidation = calls.find(({ sql }) => sql.includes("INSERT INTO mpf.snapshot_invalidation_requests"));
+  assert.deepEqual(invalidation.params, ["account-1", "2026-10-08"]);
+});

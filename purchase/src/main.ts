@@ -171,6 +171,7 @@ export async function confirmPurchaseEvent(
       FROM mpf.contribution_events e
       JOIN mpf.contribution_plans p ON p.plan_id = e.plan_id
       WHERE e.event_id = $1::uuid
+      FOR UPDATE OF e
       `,
       [eventId]
     );
@@ -185,6 +186,11 @@ export async function confirmPurchaseEvent(
       [eventId]
     );
     let changedFromDate = priorDates.rows[0]?.earliest_date ?? null;
+    await client.query(
+      `DELETE FROM mpf.purchase_transactions
+       WHERE event_id = $1::uuid AND NOT (fund_id = ANY($2::text[]))`,
+      [eventId, payload.transactions.map((tx) => tx.fund_id)]
+    );
     let confirmed = 0;
     for (const tx of payload.transactions) {
       if (!tx.fund_id || !tx.fund_id.trim()) {

@@ -301,6 +301,30 @@
               </div>
               <div id="contribution-history-table" class="table-wrap"></div>
 
+              <article id="confirmation-editor" class="form-card" hidden>
+                <div class="card-heading">
+                  <div>
+                    <h4>Enter actual purchase details</h4>
+                    <p id="confirmation-event-label"></p>
+                  </div>
+                </div>
+                <p class="form-help">List every fund in this contribution. Removing a row removes that purchase from the event.</p>
+                <form id="confirmation-form" class="stacked-form">
+                  <div class="repeat-heading">
+                    <strong>Actual fund transactions</strong>
+                    <button id="add-confirmation-row" class="text-button" type="button">+ Add fund</button>
+                  </div>
+                  <div class="confirmation-columns" aria-hidden="true">
+                    <span>Fund</span><span>Trade date</span><span>Cash amount</span><span>Unit price</span><span>Units</span><span></span>
+                  </div>
+                  <div id="confirmation-rows" class="repeat-rows" data-kind="units_delta"></div>
+                  <div class="confirmation-actions">
+                    <button class="button button-primary" type="submit">Save actual transactions</button>
+                    <button id="cancel-confirmation" class="button button-secondary" type="button">Cancel</button>
+                  </div>
+                </form>
+              </article>
+
               <article class="form-card">
                 <div class="card-heading">
                   <div>

@@ -51,6 +51,46 @@ export function registerPlansRoutes(router: Router): void {
   });
 
   /**
+   * POST /v1/accounts/:accountId/contribution-history/:eventId/confirm
+   * Replaces estimated purchases for one contribution event with actual fund
+   * transactions through the Purchase API. Path parameters: accountId and
+   * eventId (UUIDs). Body: trade_date and transactions[] containing fund_id,
+   * cash_amount, unit_price, units_delta, and the transaction trade_date.
+   */
+  router.post("/accounts/:accountId/contribution-history/:eventId/confirm", async (req, res, next) => {
+    try {
+      await ensureAccountExists(req.params.accountId);
+      const event = await query(
+        `SELECT 1 FROM mpf.contribution_events ce
+         JOIN mpf.contribution_plans cp ON cp.plan_id = ce.plan_id
+         WHERE ce.event_id = $1::uuid AND cp.account_id = $2::uuid`,
+        [req.params.eventId, req.params.accountId]
+      );
+      if (event.rows.length === 0) {
+        res.status(404).json({ detail: "Contribution event not found for this account" });
+        return;
+      }
+
+      const purchaseUrl = new URL(
+        `/v1/purchases/events/${encodeURIComponent(req.params.eventId)}/confirm`,
+        process.env.PURCHASE_API_URL ?? "http://mpf-purchase:8000"
+      );
+      const response = await fetch(purchaseUrl, {
+        method: "POST",
+        headers: {
+          "X-API-Key": req.header("X-API-Key") ?? "",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(req.body ?? {})
+      });
+      const payload = await response.json().catch(() => ({}));
+      res.status(response.status).json(payload);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
    * GET /v1/accounts/:accountId/contribution-plans
    * Lists current and historical contribution plans. Path parameter: accountId
    * (UUID).

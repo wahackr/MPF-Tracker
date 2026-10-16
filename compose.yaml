@@ -118,6 +118,7 @@ services:
     environment:
       API_KEY: ${API_KEY}
       VALUATION_API_URL: http://mpf-valuation:8000
+      PURCHASE_API_URL: http://mpf-purchase:8000
       DB_HOST: ${POSTGRES_HOST}
       DB_PORT: ${POSTGRES_PORT}
       DB_NAME: ${POSTGRES_DB}

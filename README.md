@@ -103,7 +103,7 @@ Compose maps the database settings into each application's `DB_HOST`, `DB_PORT`,
 1. Run a crawler sync and wait for a terminal job status. Funds must exist before they can be added to account holdings or allocation rules.
 2. Create an account in the dashboard, then enter dated holdings baselines from your provider statement. Include a baseline for each fund you want valued, including a zero-unit baseline for a new fund before its first purchase.
 3. Configure allocation percentages and a monthly contribution plan for each contribution stream. Allocations must total exactly `100`, and the plan and allocation stream names must match.
-4. Run purchase processing for the required month. Review estimates and confirm actual transactions through the purchase API when statement data is available.
+4. Run purchase processing for the required month. Review estimates in the dashboard's Contributions tab. When statement data is available, choose **Enter actual** for the event and enter the actual fund transactions. The submitted fund list replaces the estimates for that event.
 5. Request an on-demand valuation or save a snapshot. Save snapshots to populate valuation history; rebuild affected saved dates after correcting historical inputs.
 
 ### API examples

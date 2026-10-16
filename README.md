@@ -310,14 +310,16 @@ Python provider tests use saved responses under `mpf-codex-handoff/fixtures` and
 
 Integration tests require Docker and access to build images; the harness skips them if Docker is unavailable. Its API ports come from the Compose defaults, so stop a development stack occupying ports `8001`–`8004` before running it.
 
-Live crawler smoke tests call real provider endpoints and require explicit opt-in:
+Live crawler smoke tests call real provider endpoints. They run with the Python
+suite on every push and pull request. The Manulife tests also run as a separate
+job on every push and pull request, and daily. A failure fails the workflow:
 
 ```bash
-MPF_RUN_LIVE_TESTS=1 .venv/bin/python -m pytest -q -m live
+.venv/bin/python -m pytest -q -m live
 
 # Or run one provider:
-MPF_RUN_LIVE_TESTS=1 .venv/bin/python -m pytest -q \
+.venv/bin/python -m pytest -q \
   crawler/worker/src/__tests__/live/test_hsbc_live.py
 ```
 
-Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs the offline Python suite, all four TypeScript suites, and then Docker integration tests on pushes and pull requests.
+Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs the Python suite including live checks, all four TypeScript suites, and then Docker integration tests on pushes and pull requests.

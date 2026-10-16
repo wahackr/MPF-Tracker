@@ -231,6 +231,14 @@ def integration_harness() -> ComposeHarness:
     env["COMPOSE_PROJECT_NAME"] = COMPOSE_PROJECT
     env["POSTGRES_BIND_ADDRESS"] = "127.0.0.1"
     env["POSTGRES_HOST_PORT"] = "0"
+    env["API_BIND_ADDRESS"] = "127.0.0.1"
+    for port_name in (
+        "CRAWLER_API_HOST_PORT",
+        "PORTFOLIO_API_HOST_PORT",
+        "PURCHASE_API_HOST_PORT",
+        "VALUATION_API_HOST_PORT",
+    ):
+        env[port_name] = "0"
     env.update(TEST_DB_USERS)
 
     with tempfile.TemporaryDirectory(prefix="mpf-itest-") as temporary_dir:

@@ -39,3 +39,8 @@ export async function healthCheck(): Promise<boolean> {
     return false;
   }
 }
+
+// Close the pool after tests or service shutdown so no connections remain open.
+export async function closeDatabase(): Promise<void> {
+  await pool.end();
+}

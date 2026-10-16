@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { query, withTransaction } from "../libs/db.js";
-import { AllocationRuleSchema, ensureAccountExists, ensureFundExists } from "../libs/portfolio.js";
+import { AllocationRuleSchema, ensureAccountExists } from "../libs/portfolio.js";
 import { allocationWeightError, decimalString } from "../libs/rules.js";
 
 export function registerAllocationsRoutes(router: Router): void {
@@ -48,7 +48,14 @@ export function registerAllocationsRoutes(router: Router): void {
       }
 
       await withTransaction(async (client) => {
-        await ensureAccountExists(req.params.accountId);
+        // Validate the account on this transaction's connection.
+        const account = await client.query("SELECT 1 FROM mpf.accounts WHERE account_id = $1::uuid", [req.params.accountId]);
+        if (account.rows.length === 0) {
+          const error = new Error("Account not found");
+          (error as Error & { status?: number }).status = 404;
+          throw error;
+        }
+
         await client.query(
           `
           UPDATE mpf.allocation_rules
@@ -61,25 +68,23 @@ export function registerAllocationsRoutes(router: Router): void {
           [payload.effective_from, req.params.accountId, payload.contribution_stream.toLowerCase()]
         );
 
-        for (const item of payload.allocations) {
-          await ensureFundExists(client, item.fund_id);
-          await client.query(
-            `
-            INSERT INTO mpf.allocation_rules (
-              account_id, fund_id, contribution_stream, effective_from, effective_to, weight
-            )
-            VALUES ($1::uuid, $2, $3, $4::date, $5::date, $6::numeric)
-            `,
-            [
-              req.params.accountId,
-              item.fund_id,
-              payload.contribution_stream.toLowerCase(),
-              payload.effective_from,
-              payload.effective_to ?? null,
-              decimalString(item.weight)
-            ]
-          );
-        }
+        // Validate and insert the new version as one batch; errors roll back the retired version too.
+        const allocations = payload.allocations.map((item) => ({
+          fund_id: item.fund_id,
+          weight: decimalString(item.weight)
+        }));
+        const funds = await client.query("SELECT fund_id FROM mpf.funds WHERE fund_id = ANY($1::text[])", [allocations.map((item) => item.fund_id)]);
+        const knownFunds = new Set(funds.rows.map((fund) => fund.fund_id));
+        const missing = allocations.find((item) => !knownFunds.has(item.fund_id));
+        if (missing) throw new Error(`Fund not found: ${missing.fund_id}`);
+
+        await client.query(
+          `INSERT INTO mpf.allocation_rules (account_id, fund_id, contribution_stream, effective_from, effective_to, weight)
+           SELECT $1::uuid, fund_id, $2, $3::date, $4::date, weight
+           FROM jsonb_to_recordset($5::jsonb) AS a(fund_id text, weight numeric)`,
+          [req.params.accountId, payload.contribution_stream.toLowerCase(), payload.effective_from,
+          payload.effective_to ?? null, JSON.stringify(allocations)]
+        );
       });
 
       res.json({

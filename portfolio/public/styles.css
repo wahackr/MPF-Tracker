@@ -1,17 +1,20 @@
 :root {
-  --ink: #18211d;
-  --muted: #66716b;
-  --line: #dce3df;
+  --ink: #14140f;
+  --muted: #6a675c;
+  --line: #e0ddd2;
   --surface: #ffffff;
-  --surface-soft: #f3f6f4;
-  --canvas: #e9efeb;
-  --green: #165c46;
-  --green-dark: #0f4434;
-  --green-soft: #e1f1e9;
-  --gold: #b8842d;
-  --red: #a33f39;
-  --shadow: 0 16px 40px rgba(29, 55, 44, 0.08);
+  --surface-soft: #f6f4ec;
+  --canvas: #f4f1e8;
+  --green: #0f5d45;
+  --green-dark: #0a4533;
+  --green-soft: #e2efe4;
+  --gold: #b27f2b;
+  --red: #a23a34;
+  --shadow: 0 22px 50px rgba(28, 30, 22, 0.1);
+  --shadow-sm: 0 8px 20px rgba(28, 30, 22, 0.1);
   --radius: 18px;
+  --radius-sm: 12px;
+  --font-display: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -29,7 +32,8 @@ body {
   min-height: 100vh;
   margin: 0;
   background:
-    radial-gradient(circle at 90% 10%, rgba(184, 132, 45, 0.1), transparent 28rem),
+    radial-gradient(circle at 90% 4%, rgba(178, 127, 43, 0.1), transparent 30rem),
+    radial-gradient(circle at 4% 98%, rgba(15, 93, 69, 0.07), transparent 36rem),
     var(--canvas);
 }
 
@@ -56,35 +60,35 @@ button {
   z-index: 20;
   top: 0;
   display: flex;
-  min-height: 76px;
+  min-height: 72px;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
   padding: 12px 28px;
-  border-bottom: 1px solid rgba(220, 227, 223, 0.9);
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(10, 69, 51, 0.6);
+  background: linear-gradient(180deg, var(--green-dark), #073a2b);
+  color: #f4f1e8;
 }
 
 .brand {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  color: var(--ink);
+  color: #f4f1e8;
   text-decoration: none;
 }
 
 .brand-mark {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   place-items: center;
-  border-radius: 13px;
-  color: #fff;
-  background: var(--green);
+  border-radius: 12px;
+  color: var(--green-dark);
+  background: #f4f1e8;
   font-family: Georgia, serif;
-  font-size: 24px;
-  box-shadow: 0 8px 18px rgba(22, 92, 70, 0.25);
+  font-size: 23px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
 }
 
 .brand strong,
@@ -98,7 +102,7 @@ button {
 
 .brand small {
   margin-top: 2px;
-  color: var(--muted);
+  color: rgba(244, 241, 232, 0.66);
   font-size: 12px;
 }
 
@@ -116,20 +120,28 @@ button {
   text-transform: uppercase;
 }
 
+.connection-form {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin: 0 0 26px;
+}
+
 .connection-form input {
-  width: 210px;
+  width: 100%;
 }
 
 .workspace {
   display: grid;
   min-height: calc(100vh - 76px);
-  grid-template-columns: 310px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 310px;
 }
 
 .sidebar {
+  order: 2;
   padding: 30px 22px;
-  border-right: 1px solid var(--line);
-  background: rgba(248, 250, 249, 0.72);
+  border-left: 1px solid var(--line);
+  background: #ece8dd;
 }
 
 .content {
@@ -209,9 +221,9 @@ button {
 }
 
 .account-item.active {
-  border-color: #b9d8ca;
+  border-color: #b6d6c8;
   background: var(--green-soft);
-  box-shadow: inset 3px 0 var(--green);
+  box-shadow: inset 3px 0 0 var(--green);
 }
 
 .account-item strong,
@@ -272,10 +284,12 @@ button {
 
 .empty-state {
   display: grid;
-  max-width: 520px;
+  max-width: 560px;
   min-height: 68vh;
+  margin: 0 auto;
   align-content: center;
-  justify-items: start;
+  justify-items: center;
+  text-align: center;
 }
 
 .empty-icon {
@@ -308,10 +322,10 @@ button {
 
 .account-hero {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
-  padding-bottom: 28px;
+  flex-direction: column;
+  align-items: start;
+  gap: 14px;
+  padding-bottom: 24px;
 }
 
 .account-hero h2 {
@@ -328,7 +342,9 @@ button {
 
 .account-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  order: 2;
 }
 
 .meta-chip,
@@ -366,22 +382,38 @@ button {
 .tabs {
   display: flex;
   overflow-x: auto;
-  gap: 6px;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.55);
+  gap: 22px;
+  padding: 0 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  border-bottom: 1px solid var(--line);
 }
 
 .tab {
+  position: relative;
   flex: 0 0 auto;
-  padding: 9px 15px;
+  padding: 12px 4px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 0;
   color: var(--muted);
   background: transparent;
   font-size: 14px;
   font-weight: 700;
+  transition: color 140ms ease;
+}
+
+.tab::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 3px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 140ms ease;
 }
 
 .tab:hover {
@@ -389,9 +421,13 @@ button {
 }
 
 .tab.active {
-  color: #fff;
+  color: var(--green-dark);
+  background: transparent;
+  box-shadow: none;
+}
+
+.tab.active::after {
   background: var(--green);
-  box-shadow: 0 5px 12px rgba(22, 92, 70, 0.18);
 }
 
 .tab-panel {
@@ -512,7 +548,9 @@ button {
 }
 
 .metric-card {
-  padding: 20px;
+  padding: 20px 22px 18px;
+  background: var(--surface);
+  border-top: 3px solid var(--green);
 }
 
 .metric-card span,
@@ -594,7 +632,7 @@ select {
 input:focus,
 select:focus {
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(22, 92, 70, 0.12);
+  box-shadow: 0 0 0 3px rgba(15, 93, 69, 0.14);
 }
 
 .checkbox-label {
@@ -631,7 +669,7 @@ select:focus {
   min-height: 40px;
   padding: 9px 16px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   font-weight: 750;
   transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
 }
@@ -649,16 +687,22 @@ select:focus {
 .button-primary {
   color: #fff;
   background: var(--green);
-  box-shadow: 0 7px 16px rgba(22, 92, 70, 0.18);
+  box-shadow: 0 7px 16px rgba(15, 93, 69, 0.18);
 }
 
 .button-primary:hover {
   background: var(--green-dark);
+  box-shadow: 0 9px 18px rgba(15, 93, 69, 0.22);
 }
 
 .button-danger {
   color: #fff;
   background: var(--red);
+  box-shadow: 0 7px 16px rgba(162, 58, 52, 0.18);
+}
+
+.button-danger:hover {
+  background: #8a312c;
 }
 
 .button-secondary {
@@ -898,7 +942,7 @@ tr:last-child td {
 
 @media (max-width: 980px) {
   .workspace {
-    grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 250px;
   }
 
   .overview-grid,
@@ -914,32 +958,24 @@ tr:last-child td {
 @media (max-width: 760px) {
   .topbar {
     position: static;
-    align-items: stretch;
-    flex-direction: column;
-    padding: 16px;
-  }
-
-  .connection-form {
-    display: grid;
-    grid-template-columns: 1fr auto;
-  }
-
-  .connection-form label,
-  .status-pill {
-    grid-column: 1 / -1;
-  }
-
-  .connection-form input {
-    width: 100%;
+    align-items: center;
+    flex-direction: row;
+    padding: 16px 20px;
   }
 
   .workspace {
-    display: block;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .content {
+    order: 1;
   }
 
   .sidebar {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+    order: 2;
+    border-left: 0;
+    border-top: 1px solid var(--line);
   }
 
   .account-list {

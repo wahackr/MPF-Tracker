@@ -18,23 +18,24 @@
           </span>
         </a>
 
-        <form id="connection-form" class="connection-form">
-          <label for="api-key">API key</label>
-          <input
-            id="api-key"
-            name="api_key"
-            type="password"
-            autocomplete="current-password"
-            placeholder="Enter X-API-Key"
-            required
-          />
-          <button class="button button-primary button-small" type="submit">Connect</button>
-          <span id="connection-status" class="status-pill status-neutral">Not connected</span>
-        </form>
+        <span id="connection-status" class="status-pill status-neutral">Not connected</span>
       </header>
 
       <main class="workspace">
         <aside class="sidebar">
+          <form id="connection-form" class="connection-form">
+            <label for="api-key">API key</label>
+            <input
+              id="api-key"
+              name="api_key"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Enter X-API-Key"
+              required
+            />
+            <button class="button button-primary button-small" type="submit">Connect</button>
+          </form>
+
           <div class="section-heading">
             <div>
               <span class="eyebrow">Workspace</span>

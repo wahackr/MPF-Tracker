@@ -105,6 +105,9 @@ for (const [oldDate, newDate, expectedStart] of [
         if (sql.includes("MIN(trade_date)")) {
           return { rows: [{ earliest_date: oldDate }] };
         }
+        if (sql.includes("DELETE FROM mpf.purchase_transactions")) {
+          return { rows: [] };
+        }
         if (sql.includes("INSERT INTO mpf.purchase_transactions") ||
             sql.includes("UPDATE mpf.contribution_events") ||
             sql.includes("INSERT INTO mpf.snapshot_invalidation_requests")) {

@@ -179,6 +179,8 @@ All paths below require `X-API-Key`. IDs for accounts and jobs are UUIDs; fund I
 | GET | `/v1/purchases/transactions` | `limit` (default `500`, maximum `5000`) |
 | POST | `/v1/purchases/events/{event_id}/confirm` | `trade_date`, `transactions[]` with `fund_id`, `cash_amount`, `unit_price`, `units_delta`, optional per-transaction `trade_date` |
 
+Confirmation submits the complete transaction set for an event, including when correcting an already confirmed event. Omitted funds are removed, and all supplied transactions are stored as confirmed. Snapshots are invalidated from the earliest previous or supplied trade date onward.
+
 ### Valuation — port 8004
 
 | Method | Path | Inputs / behavior |

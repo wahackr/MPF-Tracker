@@ -19,6 +19,7 @@ type ConfirmTxInput = {
   trade_date?: string;
 };
 
+// Confirmation replaces the complete transaction set for the event.
 type ConfirmPayload = {
   trade_date: string;
   transactions: ConfirmTxInput[];
@@ -171,6 +172,7 @@ export async function confirmPurchaseEvent(
       FROM mpf.contribution_events e
       JOIN mpf.contribution_plans p ON p.plan_id = e.plan_id
       WHERE e.event_id = $1::uuid
+      FOR UPDATE OF e
       `,
       [eventId]
     );
@@ -180,11 +182,19 @@ export async function confirmPurchaseEvent(
       throw error;
     }
 
+    // Include dates of transactions that will be updated or removed.
     const priorDates = await client.query<{ earliest_date: string | null }>(
       "SELECT MIN(trade_date)::text AS earliest_date FROM mpf.purchase_transactions WHERE event_id = $1::uuid",
       [eventId]
     );
     let changedFromDate = priorDates.rows[0]?.earliest_date ?? null;
+    await client.query(
+      `
+      DELETE FROM mpf.purchase_transactions
+      WHERE event_id = $1::uuid AND NOT (fund_id = ANY($2::text[]))
+      `,
+      [eventId, payload.transactions.map((tx) => tx.fund_id)]
+    );
     let confirmed = 0;
     for (const tx of payload.transactions) {
       if (!tx.fund_id || !tx.fund_id.trim()) {

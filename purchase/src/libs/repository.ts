@@ -3,7 +3,7 @@ import { PoolClient } from "pg";
 
 import { query } from "./db.js";
 
-export async function loadActivePlans(client: PoolClient, asOfDate: string, accountId: string | undefined) {
+export async function loadPlansEffectiveOn(client: PoolClient, asOfDate: string, accountId: string | undefined) {
   const params: unknown[] = [asOfDate];
   let accountFilter = "";
   if (accountId) {
@@ -14,8 +14,7 @@ export async function loadActivePlans(client: PoolClient, asOfDate: string, acco
     `
     SELECT plan_id, account_id, contribution_stream, amount, expected_day
     FROM mpf.contribution_plans
-    WHERE active = TRUE
-      AND effective_from <= $1::date
+    WHERE effective_from <= $1::date
       AND (effective_to IS NULL OR effective_to >= $1::date)
       ${accountFilter}
     ORDER BY plan_id

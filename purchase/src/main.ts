@@ -2,7 +2,7 @@ import { Decimal } from "decimal.js";
 
 import { withTransaction } from "./libs/db.js";
 import { expectedDateForMonth, hkToday, monthStart, purchaseUnits, weightsTotalOneHundred } from "./libs/rules.js";
-import { findPriceForEstimation, loadActivePlans, loadAllocations, setEventStatus, upsertContributionEvent, upsertEstimatedTransaction } from "./libs/repository.js";
+import { findPriceForEstimation, loadPlansEffectiveOn, loadAllocations, setEventStatus, upsertContributionEvent, upsertEstimatedTransaction } from "./libs/repository.js";
 
 export { listPurchaseEvents, listPurchaseTransactions } from "./libs/repository.js";
 
@@ -39,7 +39,7 @@ export async function processPurchases(
   const asOfDate = payload.as_of_date ?? hkToday();
   const accountId = payload.account_id;
   const result = await runTransaction(async (client) => {
-    const plans = await loadActivePlans(client, asOfDate, accountId);
+    const plans = await loadPlansEffectiveOn(client, asOfDate, accountId);
 
     let processedEvents = 0;
     let estimatedEvents = 0;

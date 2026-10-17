@@ -516,9 +516,9 @@ async function loadHoldingsChart() {
       return;
     }
 
-    await loadFundNames(pricedFunds.map((fund) => fund.fund_id)).catch(() => {});
+    await loadFundNames(pricedFunds.map((fund) => fund.fund_id)).catch(() => { });
     if (state.selectedAccount?.account_id !== accountId) return;
-    const colors = ["#165c46", "#b8842d", "#397e9b", "#9b5f85", "#6e8e43", "#d1784b", "#6375a5", "#8b7657"];
+    const colors = ["#0071e1", "#af5815", "#248a3d", "#8b5fcf", "#c93f6b", "#0a86a8", "#5e8c3a", "#6e6e73"];
     let cursor = 0;
     const slices = pricedFunds.map((fund, index) => {
       const start = cursor;

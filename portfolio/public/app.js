@@ -1,3 +1,5 @@
+import { initI18n, localeTag, statusLabel, t } from "./i18n.js";
+
 const state = {
   apiKey: sessionStorage.getItem("mpf_portfolio_api_key") ?? "",
   accounts: [],
@@ -9,7 +11,11 @@ const state = {
   reconciliations: [],
   funds: new Map(),
   snapshotHistory: [],
-  valuation: null
+  valuation: null,
+  holdingsChart: null,
+  connectionStatus: { key: "status.not_connected", kind: "neutral" },
+  valuationMessageKey: "valuation.hint",
+  chartMessageKey: "chart.loading"
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -28,20 +34,21 @@ function showToast(message, type = "success") {
   }, 4200);
 }
 
-function setConnectionStatus(label, kind) {
+function setConnectionStatus(key, kind) {
+  state.connectionStatus = { key, kind };
   const status = $("#connection-status");
-  status.textContent = label;
+  status.textContent = t(key);
   status.className = `status-pill status-${kind}`;
 }
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message;
-  return "Unexpected error";
+  return t("error.unexpected");
 }
 
 async function api(path, options = {}) {
   if (!state.apiKey) {
-    throw new Error("Enter the API key before making a request.");
+    throw new Error(t("error.api_key_missing"));
   }
 
   const headers = new Headers(options.headers ?? {});
@@ -54,7 +61,7 @@ async function api(path, options = {}) {
     const details = Array.isArray(payload.issues)
       ? ` ${payload.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")}`
       : "";
-    throw new Error(`${payload.detail ?? `Request failed with ${response.status}`}${details}`);
+    throw new Error(`${payload.detail ?? t("error.request_failed", { status: response.status })}${details}`);
   }
   return payload;
 }
@@ -63,7 +70,7 @@ async function submitForm(form, action) {
   const button = form.querySelector('button[type="submit"]');
   const originalLabel = button.textContent;
   button.disabled = true;
-  button.textContent = "Saving…";
+  button.textContent = t("btn.saving");
   try {
     await action();
   } catch (error) {
@@ -82,8 +89,21 @@ function formatNumber(value) {
   if (value === null || value === undefined || value === "") return "—";
   const number = Number(value);
   return Number.isFinite(number)
-    ? new Intl.NumberFormat("en-HK", { maximumFractionDigits: 10 }).format(number)
+    ? new Intl.NumberFormat(localeTag(), { maximumFractionDigits: 10 }).format(number)
     : String(value);
+}
+
+function moneyFormatter(currency) {
+  return new Intl.NumberFormat(localeTag(), {
+    style: "currency",
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function dateTime(value) {
+  return value ? new Date(value).toLocaleString(localeTag()) : "—";
 }
 
 function fundName(fundId) {
@@ -144,7 +164,7 @@ function renderAccountList() {
   if (state.accounts.length === 0) {
     const empty = document.createElement("div");
     empty.className = "sidebar-empty";
-    empty.textContent = "No accounts yet. Create your first account below.";
+    empty.textContent = t("sidebar.empty_accounts");
     list.append(empty);
     return;
   }
@@ -161,7 +181,7 @@ function renderAccountList() {
     const label = document.createElement("strong");
     label.textContent = account.display_label;
     const detail = document.createElement("span");
-    detail.textContent = `${account.provider} · ${account.currency}${account.active ? "" : " · Inactive"}`;
+    detail.textContent = `${account.provider} · ${account.currency}${account.active ? "" : ` · ${t("account.inactive")}`}`;
     button.append(label, detail);
     button.addEventListener("click", () => selectAccount(account.account_id));
     list.append(button);
@@ -178,7 +198,7 @@ function renderAccountWorkspace() {
   $("#account-title").textContent = account.display_label;
   $("#account-scheme").textContent = account.scheme;
   $("#account-currency").textContent = account.currency;
-  $("#account-active").textContent = account.active ? "Active" : "Inactive";
+  $("#account-active").textContent = account.active ? t("common.active") : t("account.inactive");
   $("#holding-count").textContent = String(
     state.holdings.filter((holding) => holding.source !== "reconciliation").length
   );
@@ -193,113 +213,111 @@ function renderAccountWorkspace() {
   renderTable(
     "#holdings-table",
     [
-      { label: "Effective date", key: "effective_date", format: dateOnly },
-      { label: "Fund", key: "fund_id", format: fundName },
-      { label: "Units", key: "units", format: formatNumber, className: "value-positive" },
-      { label: "Status", key: "verification_status" },
-      { label: "Source", key: "source" }
+      { label: t("col.effective_date"), key: "effective_date", format: dateOnly },
+      { label: t("col.fund"), key: "fund_id", format: fundName },
+      { label: t("col.units"), key: "units", format: formatNumber, className: "value-positive" },
+      { label: t("col.status"), key: "verification_status", format: statusLabel },
+      { label: t("col.source"), key: "source" }
     ],
     state.holdings.filter((holding) => holding.source !== "reconciliation"),
-    "No holding baselines have been recorded."
+    t("empty.holdings")
   );
 
   renderTable(
     "#reconciliations-table",
     [
-      { label: "Effective date", key: "effective_date", format: dateOnly },
-      { label: "Trustee statement", key: "notes" },
-      { label: "Verified fund units", key: "holdings", format: (holdings) => holdings.map((holding) => `${fundName(holding.fund_id)}: ${formatNumber(holding.units)}`).join(" · ") }
+      { label: t("col.effective_date"), key: "effective_date", format: dateOnly },
+      { label: t("col.notes"), key: "notes" },
+      { label: t("col.verified_units"), key: "holdings", format: (holdings) => holdings.map((holding) => `${fundName(holding.fund_id)}: ${formatNumber(holding.units)}`).join(" · ") }
     ],
     state.reconciliations,
-    "No reconciliations have been recorded."
+    t("empty.reconciliations")
   );
 
   renderTable(
     "#allocations-table",
     [
-      { label: "From", key: "effective_from", format: dateOnly },
-      { label: "To", key: "effective_to", format: dateOnly },
-      { label: "Stream", key: "contribution_stream" },
-      { label: "Fund", key: "fund_id", format: fundName },
+      { label: t("col.from"), key: "effective_from", format: dateOnly },
+      { label: t("col.to"), key: "effective_to", format: dateOnly },
+      { label: t("col.stream"), key: "contribution_stream" },
+      { label: t("col.fund"), key: "fund_id", format: fundName },
       {
-        label: "Weight",
+        label: t("col.weight"),
         key: "weight",
         format: (value) => `${formatNumber(value)}%`,
         className: "value-positive"
       }
     ],
     state.allocations,
-    "No allocation rules have been published."
+    t("empty.allocations")
   );
 
   renderTable(
     "#plans-table",
     [
-      { label: "From", key: "effective_from", format: dateOnly },
-      { label: "To", key: "effective_to", format: dateOnly },
-      { label: "Stream", key: "contribution_stream" },
-      { label: "Amount", key: "amount", format: formatNumber, className: "value-positive" },
-      { label: "Expected day", key: "expected_day" },
-      { label: "Status", key: "active", format: (value) => (value ? "Active" : "Closed") }
+      { label: t("col.from"), key: "effective_from", format: dateOnly },
+      { label: t("col.to"), key: "effective_to", format: dateOnly },
+      { label: t("col.stream"), key: "contribution_stream" },
+      { label: t("col.amount"), key: "amount", format: formatNumber, className: "value-positive" },
+      { label: t("col.expected_day"), key: "expected_day" },
+      { label: t("col.status"), key: "active", format: (value) => (value ? t("common.active") : t("plan.closed")) }
     ],
     state.plans,
-    "No contribution plans have been configured."
+    t("empty.plans")
   );
 
-  const money = new Intl.NumberFormat("en-HK", {
-    style: "currency",
-    currency: account.currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
+  const money = moneyFormatter(account.currency);
   renderTable(
     "#contribution-history-table",
     [
-      { label: "Run date", key: "created_at", format: (value) => value ? new Date(value).toLocaleString("en-HK") : "—" },
-      { label: "Expected date", key: "expected_date", format: dateOnly },
-      { label: "Stream", key: "contribution_stream" },
-      { label: "Contribution", key: "amount", format: (value) => money.format(Number(value)) },
-      { label: "Status", key: "status" },
+      { label: t("col.run_date"), key: "created_at", format: dateTime },
+      { label: t("col.expected_date"), key: "expected_date", format: dateOnly },
+      { label: t("col.stream"), key: "contribution_stream" },
+      { label: t("col.contribution"), key: "amount", format: (value) => money.format(Number(value)) },
+      { label: t("col.status"), key: "status", format: statusLabel },
       {
-        label: "Fund transactions",
+        label: t("col.fund_transactions"),
         key: "transactions",
         format: (transactions) => transactions.length
-          ? transactions.map((transaction) => `${fundName(transaction.fund_id)}: ${money.format(Number(transaction.cash_amount))} at ${formatNumber(transaction.unit_price)} → ${formatNumber(transaction.units_delta)} units (${transaction.status})`).join(" · ")
+          ? transactions.map((transaction) => t("fund.transaction_line", {
+            fund: fundName(transaction.fund_id),
+            amount: money.format(Number(transaction.cash_amount)),
+            price: formatNumber(transaction.unit_price),
+            units: formatNumber(transaction.units_delta),
+            status: statusLabel(transaction.status)
+          })).join(" · ")
           : "—"
       }
     ],
     state.contributionHistory,
-    "No contribution events have been processed for this account yet."
+    t("empty.contributions")
   );
 
   renderTable(
     "#valuation-history-table",
     [
-      { label: "As of", key: "as_of_date", format: dateOnly },
+      { label: t("col.as_of"), key: "as_of_date", format: dateOnly },
       {
-        label: "Value",
+        label: t("col.value"),
         key: "total_value",
-        format: (value, row) => value === null ? "—" : new Intl.NumberFormat("en-HK", {
-          style: "currency",
-          currency: row.currency ?? account.currency,
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2
-        }).format(Number(value))
+        format: (value, row) => value === null ? "—" : moneyFormatter(row.currency ?? account.currency).format(Number(value))
       },
-      { label: "Status", key: "calculation_status" },
-      { label: "Calculated", key: "calculated_at", format: (value) => value ? new Date(value).toLocaleString("en-HK") : "—" },
-      { label: "Revision", key: "revision" }
+      { label: t("col.status"), key: "calculation_status", format: statusLabel },
+      { label: t("col.calculated"), key: "calculated_at", format: dateTime },
+      { label: t("col.revision"), key: "revision" }
     ],
     state.snapshotHistory,
-    "No valuation snapshots have been saved for this account yet."
+    t("empty.snapshots")
   );
+
+  if (state.holdingsChart) renderHoldingsChart();
 
   renderAccountList();
 }
 
 async function loadAccounts({ selectId } = {}) {
   state.accounts = await api("/v1/accounts");
-  setConnectionStatus("Connected", "good");
+  setConnectionStatus("status.connected", "good");
   renderAccountList();
 
   const targetId = selectId ?? state.selectedAccount?.account_id;
@@ -334,12 +352,13 @@ async function selectAccount(accountId) {
     ];
     await loadFundNames(fundIds);
     state.valuation = null;
+    state.holdingsChart = null;
     $("#valuation-results").hidden = true;
     $("#valuation-message").hidden = false;
-    $("#valuation-message").textContent = "Select “Check valuation” to load the latest result.";
+    setValuationMessage("valuation.hint");
     $("#holdings-chart-content").hidden = true;
     $("#holdings-chart-message").hidden = false;
-    $("#holdings-chart-message").textContent = "Open the Holdings tab to load the current allocation.";
+    setChartMessage("chart.holdings_hint");
     renderAccountWorkspace();
   } catch (error) {
     showToast(errorMessage(error), "error");
@@ -356,9 +375,9 @@ function addFundRow(containerId) {
   picker.className = "fund-picker";
   const search = document.createElement("input");
   search.type = "search";
-  search.placeholder = "Search fund name or alias";
+  search.placeholder = t("fund.search_placeholder");
   search.autocomplete = "off";
-  search.setAttribute("aria-label", "Search fund by name or alias");
+  search.setAttribute("aria-label", t("fund.search_aria"));
   search.setAttribute("aria-autocomplete", "list");
   const fund = document.createElement("input");
   fund.type = "hidden";
@@ -381,7 +400,7 @@ function addFundRow(containerId) {
     suggestions.replaceChildren();
     const loading = document.createElement("div");
     loading.className = "fund-suggestion-empty";
-    loading.textContent = "Searching funds…";
+    loading.textContent = t("fund.searching");
     suggestions.append(loading);
     suggestions.hidden = false;
     row.searchTimer = setTimeout(async () => {
@@ -392,7 +411,7 @@ function addFundRow(containerId) {
         if (result.items.length === 0) {
           const empty = document.createElement("div");
           empty.className = "fund-suggestion-empty";
-          empty.textContent = "No matching funds found.";
+          empty.textContent = t("fund.no_results");
           suggestions.append(empty);
           return;
         }
@@ -431,14 +450,14 @@ function addFundRow(containerId) {
   value.type = "number";
   value.step = kind === "weight" ? "0.01" : "any";
   value.min = "0";
-  value.placeholder = kind === "weight" ? "Weight %" : "Units";
+  value.placeholder = kind === "weight" ? t("fund.weight_placeholder") : t("fund.units_placeholder");
   value.required = true;
   if (kind === "weight") value.addEventListener("input", updateAllocationTotal);
 
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "remove-row";
-  remove.setAttribute("aria-label", "Remove fund row");
+  remove.setAttribute("aria-label", t("fund.remove_aria"));
   remove.textContent = "×";
   remove.addEventListener("click", () => {
     row.remove();
@@ -455,7 +474,7 @@ function readFundRows(containerId, valueName) {
     [valueName]: row.querySelector(`[name="${valueName}"]`).value
   }));
   if (rows.length === 0 || rows.some((row) => !row.fund_id || row[valueName] === "")) {
-    throw new Error("Select a fund from the search results and complete every value.");
+    throw new Error(t("error.fund_rows_incomplete"));
   }
   return rows;
 }
@@ -476,7 +495,7 @@ function updateAllocationTotal() {
 }
 
 function selectedAccountId() {
-  if (!state.selectedAccount) throw new Error("Select an account first.");
+  if (!state.selectedAccount) throw new Error(t("error.account_required"));
   return state.selectedAccount.account_id;
 }
 
@@ -492,6 +511,46 @@ function setDefaultDates() {
   }
 }
 
+function renderHoldingsChart() {
+  const chart = state.holdingsChart;
+  if (!chart) return;
+  const { accountId, requestedAsOf, unpriced, currency, slices, pricedTotal } = chart;
+  const pie = $("#holdings-pie");
+  pie.style.background = `conic-gradient(${slices.map((slice) => `${slice.color} ${slice.start}deg ${slice.end}deg`).join(", ")})`;
+  pie.setAttribute(
+    "aria-label",
+    t("chart.pie_aria", {
+      list: slices.map((slice) => `${slice.info?.name ?? slice.fund_id} ${slice.percentage.toFixed(1)}%`).join(", ")
+    })
+  );
+
+  const legend = $("#holdings-legend");
+  legend.replaceChildren();
+  const money = moneyFormatter(currency);
+  for (const slice of slices) {
+    const item = document.createElement("li");
+    const swatch = document.createElement("span");
+    swatch.className = "holdings-legend-swatch";
+    swatch.style.backgroundColor = slice.color;
+    const details = document.createElement("span");
+    details.className = "holdings-legend-details";
+    const name = document.createElement("strong");
+    name.textContent = slice.info?.name ?? slice.fund_id;
+    const amount = document.createElement("small");
+    amount.textContent = `${slice.percentage.toFixed(1)}% · ${money.format(slice.value)}`;
+    details.append(name, amount);
+    item.append(swatch, details);
+    legend.append(item);
+  }
+
+  const message = $("#holdings-chart-message");
+  state.chartMessageKey = null;
+  message.textContent =
+    t("chart.as_of_priced", { date: dateOnly(requestedAsOf), amount: money.format(pricedTotal) }) +
+    (unpriced > 0 ? t("chart.unpriced_excluded", { count: unpriced }) : "");
+  $("#holdings-chart-content").hidden = false;
+}
+
 async function loadHoldingsChart() {
   if (!state.selectedAccount) return;
   const accountId = state.selectedAccount.account_id;
@@ -499,10 +558,10 @@ async function loadHoldingsChart() {
   const message = $("#holdings-chart-message");
   const content = $("#holdings-chart-content");
   button.disabled = true;
-  button.textContent = "Loading…";
+  button.textContent = t("btn.loading");
   content.hidden = true;
   message.hidden = false;
-  message.textContent = "Loading current fund values…";
+  setChartMessage("chart.loading_values");
   try {
     const result = await api(`/v1/valuation/latest?account_id=${encodeURIComponent(accountId)}`);
     if (state.selectedAccount?.account_id !== accountId) return;
@@ -512,7 +571,8 @@ async function loadHoldingsChart() {
       .map((fund) => ({ ...fund, value: Number(fund.market_value) }));
     const pricedTotal = pricedFunds.reduce((sum, fund) => sum + fund.value, 0);
     if (pricedFunds.length === 0 || pricedTotal <= 0) {
-      message.textContent = "No priced fund holdings are available for this account yet.";
+      state.holdingsChart = null;
+      setChartMessage("chart.no_priced");
       return;
     }
 
@@ -526,38 +586,23 @@ async function loadHoldingsChart() {
       cursor += percentage * 3.6;
       return { ...fund, percentage, start, end: cursor, color: colors[index % colors.length], info: state.funds.get(fund.fund_id) };
     });
-    const pie = $("#holdings-pie");
-    pie.style.background = `conic-gradient(${slices.map((slice) => `${slice.color} ${slice.start}deg ${slice.end}deg`).join(", ")})`;
-    pie.setAttribute("aria-label", `Fund allocation by value: ${slices.map((slice) => `${slice.info?.name ?? slice.fund_id} ${slice.percentage.toFixed(1)} percent`).join(", ")}`);
-
-    const legend = $("#holdings-legend");
-    legend.replaceChildren();
-    const currency = account.currency ?? state.selectedAccount.currency;
-    const money = new Intl.NumberFormat("en-HK", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    for (const slice of slices) {
-      const item = document.createElement("li");
-      const swatch = document.createElement("span");
-      swatch.className = "holdings-legend-swatch";
-      swatch.style.backgroundColor = slice.color;
-      const details = document.createElement("span");
-      details.className = "holdings-legend-details";
-      const name = document.createElement("strong");
-      name.textContent = slice.info?.name ?? slice.fund_id;
-      const amount = document.createElement("small");
-      amount.textContent = `${slice.percentage.toFixed(1)}% · ${money.format(slice.value)}`;
-      details.append(name, amount);
-      item.append(swatch, details);
-      legend.append(item);
-    }
-
-    const unpriced = account?.unpriced_fund_count ?? 0;
-    message.textContent = `As of ${dateOnly(result.requested_as_of)} · priced total ${money.format(pricedTotal)}${unpriced > 0 ? ` · ${unpriced} unpriced fund${unpriced === 1 ? "" : "s"} excluded` : ""}`;
-    content.hidden = false;
+    state.holdingsChart = {
+      accountId,
+      requestedAsOf: result.requested_as_of,
+      unpriced: account?.unpriced_fund_count ?? 0,
+      currency: account.currency ?? state.selectedAccount.currency,
+      slices,
+      pricedTotal
+    };
+    renderHoldingsChart();
   } catch (error) {
-    if (state.selectedAccount?.account_id === accountId) message.textContent = errorMessage(error);
+    if (state.selectedAccount?.account_id === accountId) {
+      state.chartMessageKey = null;
+      message.textContent = errorMessage(error);
+    }
   } finally {
     button.disabled = false;
-    button.textContent = "Refresh";
+    button.textContent = t("btn.refresh");
   }
 }
 
@@ -566,7 +611,7 @@ async function loadSnapshotHistory() {
   const accountId = state.selectedAccount.account_id;
   const button = $("#refresh-valuation-history");
   button.disabled = true;
-  button.textContent = "Loading…";
+  button.textContent = t("btn.loading");
   try {
     const result = await api(`/v1/valuation/history?account_id=${encodeURIComponent(accountId)}`);
     if (state.selectedAccount?.account_id !== accountId) return;
@@ -576,8 +621,53 @@ async function loadSnapshotHistory() {
     showToast(errorMessage(error), "error");
   } finally {
     button.disabled = false;
-    button.textContent = "Refresh history";
+    button.textContent = t("btn.refresh_history");
   }
+}
+
+function setValuationMessage(key) {
+  state.valuationMessageKey = key;
+  $("#valuation-message").textContent = t(key);
+}
+
+function setChartMessage(key) {
+  state.chartMessageKey = key;
+  $("#holdings-chart-message").textContent = t(key);
+}
+
+function renderValuationResults() {
+  const valuation = state.valuation;
+  if (!valuation) return;
+  const { result, account: accountResult } = valuation;
+  const currency = accountResult.currency ?? state.selectedAccount?.currency ?? "HKD";
+  const money = moneyFormatter(currency);
+  const amount = accountResult.total_value ?? accountResult.priced_subtotal;
+  $("#valuation-total").textContent = amount === null || amount === undefined
+    ? t("valuation.unavailable")
+    : money.format(Number(amount));
+  $("#valuation-currency").textContent = accountResult.total_value === null
+    ? t("valuation.priced_subtotal", { currency })
+    : currency;
+  $("#valuation-status").textContent = statusLabel(accountResult.calculation_status);
+  $("#valuation-as-of").textContent = t("valuation.as_of", { date: dateOnly(result.requested_as_of) });
+  $("#valuation-unpriced").textContent = String(accountResult.unpriced_fund_count);
+  $("#valuation-calculated-at").textContent = t("valuation.calculated", { time: dateTime(result.calculated_at) });
+  renderTable(
+    "#valuation-funds-table",
+    [
+      { label: t("col.fund"), key: "fund_id", format: fundName },
+      { label: t("col.units"), key: "units", format: formatNumber },
+      { label: t("col.price"), key: "price", format: formatNumber },
+      { label: t("col.price_date"), key: "price_date", format: dateOnly },
+      { label: t("col.value"), key: "market_value", format: (value) => value === null ? "—" : money.format(Number(value)) },
+      { label: t("col.price_status"), key: "price_status", format: statusLabel },
+      { label: t("col.units_status"), key: "units_status", format: statusLabel }
+    ],
+    accountResult.funds ?? [],
+    t("empty.valuation_funds")
+  );
+  $("#valuation-message").hidden = true;
+  $("#valuation-results").hidden = false;
 }
 
 function registerTabs() {
@@ -600,14 +690,14 @@ function registerForms() {
       state.apiKey = $("#api-key").value.trim();
       sessionStorage.setItem("mpf_portfolio_api_key", state.apiKey);
       await loadAccounts();
-      showToast("Connected to the Portfolio API.");
+      showToast(t("toast.connected"));
     });
   });
 
   $("#refresh-accounts").addEventListener("click", async () => {
     try {
       await loadAccounts();
-      showToast("Accounts refreshed.");
+      showToast(t("toast.accounts_refreshed"));
     } catch (error) {
       showToast(errorMessage(error), "error");
     }
@@ -620,7 +710,7 @@ function registerForms() {
   $("#refresh-contribution-history").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
-    button.textContent = "Loading…";
+    button.textContent = t("btn.loading");
     try {
       const accountId = selectedAccountId();
       const result = await api(`/v1/accounts/${accountId}/contribution-history`);
@@ -632,62 +722,37 @@ function registerForms() {
       showToast(errorMessage(error), "error");
     } finally {
       button.disabled = false;
-      button.textContent = "Refresh history";
+      button.textContent = t("btn.refresh_history");
     }
   });
 
   $("#load-valuation").addEventListener("click", async (event) => {
     const button = event.currentTarget;
     button.disabled = true;
-    button.textContent = "Loading…";
+    button.textContent = t("btn.loading");
     $("#valuation-results").hidden = true;
     $("#valuation-message").hidden = false;
-    $("#valuation-message").textContent = "Calculating the latest valuation…";
+    setValuationMessage("valuation.calculating");
     try {
       const accountId = selectedAccountId();
       const result = await api(`/v1/valuation/latest?account_id=${encodeURIComponent(accountId)}`);
       const accountResult = result.accounts?.find((item) => item.account_id === accountId);
       if (!accountResult) {
+        state.valuation = null;
         $("#valuation-results").hidden = true;
-        $("#valuation-message").textContent = "No holdings are available to value yet. Add a holding baseline in the Holdings tab, then check again.";
+        setValuationMessage("valuation.no_holdings");
         return;
       }
 
       state.valuation = { result, account: accountResult };
-      const currency = accountResult.currency ?? state.selectedAccount.currency;
-      const amount = accountResult.total_value ?? accountResult.priced_subtotal;
-      $("#valuation-total").textContent = amount === null || amount === undefined
-        ? "Unavailable"
-        : new Intl.NumberFormat("en-HK", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(amount));
-      $("#valuation-currency").textContent = accountResult.total_value === null
-        ? `Priced subtotal · ${currency}`
-        : currency;
-      $("#valuation-status").textContent = accountResult.calculation_status;
-      $("#valuation-as-of").textContent = `As of ${dateOnly(result.requested_as_of)}`;
-      $("#valuation-unpriced").textContent = String(accountResult.unpriced_fund_count);
-      $("#valuation-calculated-at").textContent = `Calculated ${new Date(result.calculated_at).toLocaleString("en-HK")}`;
-      renderTable(
-        "#valuation-funds-table",
-        [
-          { label: "Fund", key: "fund_id", format: fundName },
-          { label: "Units", key: "units", format: formatNumber },
-          { label: "Price", key: "price", format: formatNumber },
-          { label: "Price date", key: "price_date", format: dateOnly },
-          { label: "Value", key: "market_value", format: (value) => value === null ? "—" : new Intl.NumberFormat("en-HK", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value)) },
-          { label: "Price status", key: "price_status" },
-          { label: "Units status", key: "units_status" }
-        ],
-        accountResult.funds ?? [],
-        "No fund holdings were found for this account."
-      );
-      $("#valuation-message").hidden = true;
-      $("#valuation-results").hidden = false;
+      renderValuationResults();
     } catch (error) {
+      state.valuationMessageKey = null;
       $("#valuation-message").textContent = errorMessage(error);
       showToast(errorMessage(error), "error");
     } finally {
       button.disabled = false;
-      button.textContent = "Check valuation";
+      button.textContent = t("btn.check_valuation");
     }
   });
 
@@ -708,7 +773,7 @@ function registerForms() {
       form.elements.currency.value = "HKD";
       form.closest("details").open = false;
       await loadAccounts({ selectId: created.account_id });
-      showToast("Account created.");
+      showToast(t("toast.account_created"));
     });
   });
 
@@ -726,7 +791,7 @@ function registerForms() {
         })
       });
       await loadAccounts({ selectId: accountId });
-      showToast("Account updated.");
+      showToast(t("toast.account_updated"));
     });
   });
 
@@ -748,7 +813,7 @@ function registerForms() {
       resetFundRows("baseline-rows");
       setDefaultDates();
       await selectAccount(accountId);
-      showToast("Holding baseline recorded.");
+      showToast(t("toast.baseline_recorded"));
     });
   });
 
@@ -770,7 +835,7 @@ function registerForms() {
       resetFundRows("allocation-rows");
       setDefaultDates();
       await selectAccount(accountId);
-      showToast("Allocation rules published.");
+      showToast(t("toast.allocation_published"));
     });
   });
 
@@ -792,7 +857,7 @@ function registerForms() {
       form.reset();
       setDefaultDates();
       await selectAccount(accountId);
-      showToast("Contribution plan saved.");
+      showToast(t("toast.plan_saved"));
     });
   });
 
@@ -814,7 +879,7 @@ function registerForms() {
       resetFundRows("reconciliation-rows");
       setDefaultDates();
       await selectAccount(accountId);
-      showToast("Reconciliation recorded.");
+      showToast(t("toast.reconciliation_recorded"));
     });
   });
 
@@ -824,6 +889,15 @@ function registerForms() {
 }
 
 async function initialize() {
+  initI18n(() => {
+    setConnectionStatus(state.connectionStatus.key, state.connectionStatus.kind);
+    renderAccountList();
+    if (state.selectedAccount) renderAccountWorkspace();
+    if (state.valuation) renderValuationResults();
+    else if (state.valuationMessageKey) setValuationMessage(state.valuationMessageKey);
+    if (state.holdingsChart) renderHoldingsChart();
+    else if (state.chartMessageKey) setChartMessage(state.chartMessageKey);
+  });
   registerTabs();
   registerForms();
   resetFundRows("baseline-rows");
@@ -833,9 +907,12 @@ async function initialize() {
 
   try {
     const health = await fetch("/health").then((response) => response.json());
-    setConnectionStatus(health.status === "ready" ? "API ready" : "API unavailable", health.status === "ready" ? "neutral" : "bad");
+    setConnectionStatus(
+      health.status === "ready" ? "status.api_ready" : "status.api_unavailable",
+      health.status === "ready" ? "neutral" : "bad",
+    );
   } catch {
-    setConnectionStatus("API unavailable", "bad");
+    setConnectionStatus("status.api_unavailable", "bad");
   }
 
   if (state.apiKey) {
@@ -843,7 +920,7 @@ async function initialize() {
     try {
       await loadAccounts();
     } catch (error) {
-      setConnectionStatus("Key rejected", "bad");
+      setConnectionStatus("status.key_rejected", "bad");
       showToast(errorMessage(error), "error");
     }
   }

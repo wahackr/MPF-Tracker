@@ -129,6 +129,45 @@ button {
   width: 210px;
 }
 
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.lang-switch {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.lang-button {
+  padding: 6px 11px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.lang-button:hover {
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.lang-button[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
 .workspace {
   display: grid;
   min-height: calc(100vh - 64px);
@@ -893,6 +932,10 @@ tr:last-child td {
   .connection-form {
     display: grid;
     grid-template-columns: 1fr auto;
+  }
+
+  .topbar-right {
+    justify-content: space-between;
   }
 
   .connection-form label,

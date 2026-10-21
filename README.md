@@ -142,54 +142,164 @@ Crawler requests accept `provider: "all" | "hsbc" | "manulife"`. Sync accepts `r
 
 ## API reference
 
-All paths below require `X-API-Key`. IDs for accounts and jobs are UUIDs; fund IDs come from the fund catalogue. Dates use `YYYY-MM-DD`. Decimal inputs accept strings or numbers; use strings when preserving precision matters.
+Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key returns `401 {"detail":"Invalid or missing API key"}`). Each service also exposes a public `GET /health` that needs no key and returns `200 {"service":..., "status":"ready", "database":"up"}` when PostgreSQL is reachable, or `503` with `status:"not_ready", database:"down"` otherwise. Account and job IDs are UUIDs; fund IDs come from the fund catalogue; dates use `YYYY-MM-DD`; decimal inputs accept strings or numbers (use strings to preserve precision). Validation failures return `400 {"detail":"Invalid request payload","issues":[...]}` from the Zod schema.
 
 ### Crawler — port 8001
 
-| Method | Path | Inputs / behavior |
-| --- | --- | --- |
-| POST | `/v1/crawl/jobs/sync` | Queue a rolling sync |
-| POST | `/v1/crawl/jobs/backfill` | Queue an explicit date range |
-| GET | `/v1/crawl/jobs/{job_id}` | Status, request, result, attempts, and error |
-| GET | `/v1/funds` | `limit` (default `200`, maximum `1000`) |
-| GET | `/v1/funds/{fund_id}/prices` | Optional `from_date`, `to_date`, `limit` (default `500`, maximum `5000`) |
+#### `POST /v1/crawl/jobs/sync`
+- **Purpose:** enqueue an asynchronous rolling-window price refresh job for the worker to execute.
+- **Body parameters:** `provider` — `"all"` (default), `"hsbc"`, or `"manulife"`; `rolling_days` — integer `1`–`28` (default `7`).
+- **Headers:** optional `Idempotency-Key` — reuse the existing job for an identical request; reusing a key with a different request returns `409 {"detail":"Idempotency-Key is already used for a different crawler request"}`. Omitting it generates a fresh key and job.
+- **Returns:** `202 {"job_id": UUID, "service": "crawler", "job_type": "sync", "status": "queued"}`.
+
+#### `POST /v1/crawl/jobs/backfill`
+- **Purpose:** enqueue an asynchronous job that fetches an explicit date range of prices.
+- **Body parameters:** `provider` (as above, default `"all"`); `from_date` and `to_date` — both required, `YYYY-MM-DD`. If `from_date > to_date`, returns `400 {"detail":"from_date must be <= to_date"}`.
+- **Headers:** optional `Idempotency-Key` (same semantics as sync).
+- **Returns:** `202 {"job_id": UUID, "service": "crawler", "job_type": "backfill", "status": "queued"}`.
+
+#### `GET /v1/crawl/jobs/{job_id}`
+- **Purpose:** read the current state of a queued crawler job.
+- **Path parameter:** `job_id` (UUID).
+- **Returns:** `200` with the job row `{job_id, service, job_type, status, idempotency_key, request, result, attempts, error_message, created_at, updated_at}`. `status` progresses `queued` → `running` → `succeeded`/`partial`/`failed`. Returns `404 {"detail":"Job not found"}` for an unknown ID.
+
+#### `GET /v1/funds`
+- **Purpose:** list crawled funds in the catalogue.
+- **Query parameter:** `limit` — default `200`, maximum `1000` (out-of-range or non-numeric values fall back to the default).
+- **Returns:** `200 {"count": N, "items": [{fund_id, provider, provider_fund_code, name, currency, last_seen_at}]}`, ordered by provider then fund ID.
+
+#### `GET /v1/funds/{fund_id}/prices`
+- **Purpose:** read historical price rows for one fund.
+- **Path parameter:** `fund_id`.
+- **Query parameters:** `from_date` and `to_date` (optional `YYYY-MM-DD` bounds); `limit` — default `500`, maximum `5000`.
+- **Returns:** `200 {"fund_id": ..., "count": N, "items": [{fund_id, price_date, bid, offer, source, fetched_at, updated_at}]}`, newest price date first.
 
 ### Portfolio — port 8002
 
-| Method | Path | Inputs / behavior |
-| --- | --- | --- |
-| GET | `/v1/funds` | Search via `search` (at least two characters), or resolve comma-separated `ids` (up to 100) |
-| GET / POST | `/v1/accounts` | List accounts / create with `provider`, `scheme`, `display_label`, optional `currency` (default `HKD`) |
-| GET / PUT | `/v1/accounts/{id}` | Read / update `display_label`, `currency`, or `active` |
-| GET | `/v1/accounts/{id}/holdings` | Read recorded holdings baselines |
-| POST | `/v1/accounts/{id}/baselines` | `effective_date`, `source`, `verification_status`, `holdings[]` with `fund_id` and `units` |
-| GET / PUT | `/v1/accounts/{id}/allocation-rules` | Read / version a stream's allocations using `effective_from`, optional `effective_to`, `contribution_stream`, `allocations[]` with `fund_id` and `weight` |
-| GET / PUT | `/v1/accounts/{id}/contribution-plans` | Read / version a plan using `contribution_stream`, `amount`, `expected_day` (1–31), `effective_from`, optional `effective_to` |
-| GET | `/v1/accounts/{id}/contribution-history` | Processed events with estimated or confirmed transactions |
-| GET / POST | `/v1/accounts/{id}/reconciliations` | Read / record statement holdings using `effective_date`, optional `notes`, `holdings[]` with `fund_id` and `units` |
-| GET | `/v1/valuation/latest` | Proxy on-demand valuation; required `account_id` |
-| GET | `/v1/valuation/history` | Proxy saved snapshots; required `account_id`, optional `from_date`, `to_date` |
+#### `GET /v1/funds`
+- **Purpose:** resolve fund IDs for display, or search the fund catalogue for the dashboard picker.
+- **Query parameters:** `ids` — comma-separated fund IDs (takes precedence over `search`, capped at 100); `search` — name/ID/provider-code/alias fragment, minimum two characters (shorter or empty returns `{"count":0,"items":[]}`).
+- **Returns:** `200 {"count": N, "items": [{fund_id, provider, provider_fund_code, name, aliases: [...]}]}`. Search results are ranked (name match first, then alias) and limited to 20.
+
+#### `GET /v1/accounts`
+- **Purpose:** list all MPF accounts, newest first.
+- **Parameters:** none.
+- **Returns:** `200` array of `{account_id, provider, scheme, display_label, currency, active}`.
+
+#### `POST /v1/accounts`
+- **Purpose:** create a new account.
+- **Body parameters:** `provider` (1–64 chars), `scheme` (1–64 chars), `display_label` (1–255 chars), `currency` — 3-letter code (default `HKD`, upper-cased).
+- **Returns:** `201` with the created `{account_id, provider, scheme, display_label, currency, active}`.
+
+#### `GET /v1/accounts/{account_id}`
+- **Purpose:** read one account.
+- **Path parameter:** `account_id` (UUID).
+- **Returns:** `200 {account_id, provider, scheme, display_label, currency, active}`, or `404 {"detail":"Account not found"}`.
+
+#### `PUT /v1/accounts/{account_id}`
+- **Purpose:** update mutable account fields.
+- **Body parameters:** one or more of `display_label` (1–255), `currency` (3-letter), `active` (boolean). An empty body returns `400 {"detail":"At least one field must be supplied"}`.
+- **Returns:** `200` with the updated account row.
+
+#### `GET /v1/accounts/{account_id}/holdings`
+- **Purpose:** list every recorded holdings baseline for an account, newest first.
+- **Returns:** `200 {account_id, items: [{baseline_id, fund_id, effective_date, units, source, verification_status, created_at}]}`.
+
+#### `POST /v1/accounts/{account_id}/baselines`
+- **Purpose:** record a dated set of fund unit balances and invalidate derived snapshots from that date.
+- **Body parameters:** `effective_date`; `source` (1–64 chars); `verification_status` — `"VERIFIED"` or `"ESTIMATED"`; `holdings[]` (at least one) with `fund_id` and `units`. Unknown fund IDs return `400` with `Fund not found: <id>`.
+- **Returns:** `200 {account_id, inserted_baselines: N}`.
+
+#### `GET /v1/accounts/{account_id}/allocation-rules`
+- **Purpose:** list current and historical allocation rules for an account, newest first.
+- **Returns:** `200 {account_id, items: [{rule_id, fund_id, contribution_stream, effective_from, effective_to, weight, created_at}]}`.
+
+#### `PUT /v1/accounts/{account_id}/allocation-rules`
+- **Purpose:** version the allocation for one contribution stream — retiring the prior version and inserting a new one.
+- **Body parameters:** `effective_from`; optional `effective_to`; `contribution_stream` (1–32 chars, lower-cased); `allocations[]` (at least one) with `fund_id` and `weight`. Weights must be `>= 0` and sum to exactly `100` (otherwise `400 {"detail":"allocations[].weight must be >= 0"}` or `{"detail":"allocation weights must sum to exactly 100"}`).
+- **Returns:** `200 {account_id, contribution_stream, effective_from, allocation_count: N}`.
+
+#### `GET /v1/accounts/{account_id}/contribution-plans`
+- **Purpose:** list current and historical contribution plans, newest first.
+- **Returns:** `200 {account_id, items: [{plan_id, contribution_stream, amount, expected_day, effective_from, effective_to, active, created_at}]}`.
+
+#### `PUT /v1/accounts/{account_id}/contribution-plans`
+- **Purpose:** replace the active plan for one contribution stream (prior version is deactivated and closed).
+- **Body parameters:** `contribution_stream` (1–32, lower-cased); `amount` (must be `> 0`, else `400 {"detail":"amount must be > 0"}`); `expected_day` (integer `1`–`31`); `effective_from`; optional `effective_to`.
+- **Returns:** `200 {plan_id, account_id, contribution_stream}`.
+
+#### `GET /v1/accounts/{account_id}/contribution-history`
+- **Purpose:** list processed contribution events with their estimated or confirmed transactions.
+- **Returns:** `200 {account_id, count: N, items: [{event_id, period, expected_date, amount, status, created_at, contribution_stream, transactions: [{fund_id, trade_date, cash_amount, unit_price, units_delta, status}]}]}`, newest first.
+
+#### `GET /v1/accounts/{account_id}/reconciliations`
+- **Purpose:** list reconciliation records with the verified balances recorded on each date.
+- **Returns:** `200 {account_id, items: [{reconciliation_id, effective_date, notes, created_at, holdings: [{fund_id, units}]}]}`, newest first.
+
+#### `POST /v1/accounts/{account_id}/reconciliations`
+- **Purpose:** append an authoritative eMPF reconciliation, create `VERIFIED` holding baselines (source `reconciliation`), and invalidate derived snapshots.
+- **Body parameters:** `effective_date`; optional `notes`; `holdings[]` (at least one) with `fund_id` and `units`.
+- **Returns:** `200 {account_id, effective_date, inserted_baselines: N}`.
+
+#### `GET /v1/valuation/latest`
+- **Purpose:** proxy the on-demand valuation from the Valuation API for the dashboard.
+- **Query parameter:** `account_id` (required UUID; missing returns `400 {"detail":"account_id query parameter is required"}`).
+- **Returns:** the Valuation API's `latest` payload (status and body are passed through).
+
+#### `GET /v1/valuation/history`
+- **Purpose:** proxy saved valuation snapshots from the Valuation API.
+- **Query parameters:** `account_id` (required UUID); optional `from_date`, `to_date`.
+- **Returns:** the Valuation API's `history` payload (passed through).
 
 ### Purchase — port 8003
 
-| Method | Path | Inputs / behavior |
-| --- | --- | --- |
-| POST | `/v1/purchases/process` | Optional `as_of_date` (default Hong Kong today), `account_id` |
-| GET | `/v1/purchases/events` | `limit` (default `500`, maximum `5000`) |
-| GET | `/v1/purchases/transactions` | `limit` (default `500`, maximum `5000`) |
-| POST | `/v1/purchases/events/{event_id}/confirm` | `trade_date`, `transactions[]` with `fund_id`, `cash_amount`, `unit_price`, `units_delta`, optional per-transaction `trade_date` |
+#### `POST /v1/purchases/process`
+- **Purpose:** synchronously create contribution events for the month containing `as_of_date`, estimate purchases for due plans, and enqueue snapshot invalidations.
+- **Body parameters:** optional `as_of_date` (`YYYY-MM-DD`, default Hong Kong today); optional `account_id` (UUID, restricts to one account).
+- **Returns:** `200` summary `{as_of_date, processed_events, estimated_events, waiting_events, failed_events, inserted_transactions, updated_transactions, waiting_details: [{event_id, reason}]}`. Event statuses become `ESTIMATED`, `WAITING_FOR_PRICE` (missing/nonpositive price), or `FAILED_REVIEW` (missing/invalid allocation); already-`CONFIRMED` events are skipped.
 
-Confirmation submits the complete transaction set for an event, including when correcting an already confirmed event. Omitted funds are removed, and all supplied transactions are stored as confirmed. Snapshots are invalidated from the earliest previous or supplied trade date onward.
+#### `GET /v1/purchases/events`
+- **Purpose:** list contribution events, newest expected date first.
+- **Query parameter:** `limit` — default `500`, clamped to `1`–`5000`.
+- **Returns:** `200 {count: N, items: [{event_id, plan_id, period, expected_date, amount, status, created_at, updated_at}]}`.
+
+#### `GET /v1/purchases/transactions`
+- **Purpose:** list purchase transactions, newest trade date first.
+- **Query parameter:** `limit` — default `500`, clamped to `1`–`5000`.
+- **Returns:** `200 {count: N, items: [{transaction_id, event_id, fund_id, trade_date, cash_amount, unit_price, units_delta, status, estimation_policy, created_at, updated_at}]}`.
+
+#### `POST /v1/purchases/events/{event_id}/confirm`
+- **Purpose:** confirm the complete transaction set for one contribution event, replacing estimates and marking the event `CONFIRMED`. Funds omitted from the payload are removed; all supplied transactions are stored as `CONFIRMED`.
+- **Path parameter:** `event_id` (UUID; unknown returns `404 {"detail":"Contribution event not found"}`).
+- **Body parameters:** `trade_date` (`YYYY-MM-DD`, default trade date); `transactions[]` (at least one) with `fund_id`, `cash_amount`, `unit_price`, `units_delta`, and optional per-transaction `trade_date`. `fund_id` values must be unique (duplicates return `400 {"detail":"transactions[].fund_id must be unique"}`).
+- **Returns:** `200 {event_id, confirmed_transactions: N}`. Snapshots are invalidated from the earliest previous or supplied trade date onward.
 
 ### Valuation — port 8004
 
-| Method | Path | Inputs / behavior |
-| --- | --- | --- |
-| POST | `/v1/valuation/snapshot` | Save calculations; optional `as_of_date`, `account_id` |
-| POST | `/v1/valuation/rebuild` | Recalculate existing saved dates; optional `from_date`, `to_date`, `account_id`. Without dates, rebuild stale snapshots |
-| GET | `/v1/valuation/latest` | Calculate for Hong Kong today; optional `account_id`, `include_estimated=false` |
-| GET | `/v1/valuation/as-of` | Calculate for required `date`; optional `account_id`, `include_estimated=false` |
-| GET | `/v1/valuation/history` | Read saved snapshots; optional `account_id`, `from_date`, `to_date` |
+#### `POST /v1/valuation/snapshot`
+- **Purpose:** apply pending invalidations, calculate the valuation for a date, and persist per-account snapshots (incrementing revisions on replacement).
+- **Body parameters:** optional `as_of_date` (`YYYY-MM-DD`, default Hong Kong today); optional `account_id` (UUID).
+- **Returns:** `200 {requested_as_of, saved_accounts: N, calculation_status, unpriced_fund_count}`.
+
+#### `POST /v1/valuation/rebuild`
+- **Purpose:** apply pending invalidations and recalculate existing saved snapshot dates (does not fill missing calendar dates).
+- **Body parameters:** optional `from_date` and `to_date` (`YYYY-MM-DD`); optional `account_id`. With neither date, rebuilds stale snapshots; with a date range, rebuilds saved dates within it.
+- **Returns:** `200 {rebuilt_dates: [...], rebuilt_count: N, invalidations_applied: N}`.
+
+#### `GET /v1/valuation/latest`
+- **Purpose:** calculate the valuation for Hong Kong today without saving.
+- **Query parameters:** optional `account_id` (UUID); `include_estimated` — defaults to `true`, set `false` to exclude estimated units.
+- **Returns:** `200` `CalculationResult` `{requested_as_of, calculated_at, currency: "HKD", calculation_status: "COMPLETE"|"PARTIAL"|"STALE", total_value: string|null, priced_subtotal, unpriced_fund_count, accounts: [{account_id, currency, calculation_status, total_value, priced_subtotal, unpriced_fund_count, funds: [...]}]}`. `total_value` is `null` when any fund is unpriced (`PARTIAL`).
+
+#### `GET /v1/valuation/as-of`
+- **Purpose:** calculate the valuation for a specific date without saving.
+- **Query parameters:** `date` — required `YYYY-MM-DD` (missing/invalid returns `400 {"detail":"date query parameter must be YYYY-MM-DD"}`); optional `account_id`; `include_estimated` (default `true`).
+- **Returns:** same `CalculationResult` shape as `latest`.
+
+#### `GET /v1/valuation/history`
+- **Purpose:** read saved valuation snapshots.
+- **Query parameters:** optional `account_id`, `from_date`, `to_date`.
+- **Returns:** `200 {count: N, items: [...]}` of persisted snapshot records.
 
 ## Calculation behavior and limits
 

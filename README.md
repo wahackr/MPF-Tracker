@@ -281,6 +281,61 @@ Crawler submission returns HTTP `202`, which means the job was queued. Poll its 
 
 Empty purchase and snapshot bodies use today's date in Hong Kong and include all applicable accounts. Supply `as_of_date` (`YYYY-MM-DD`) to process an earlier month or save a historical snapshot. Purchase processing handles only the month containing that date, so process missed months explicitly. Use the backfill and rebuild endpoints in the API reference when recovering older prices or recalculating existing history.
 
+## Migrating the database between environments
+
+Use this runbook to move data from a dev/test instance to another host, for example `10.7.7.79` to `10.7.7.78`. Copy `pg_dump` output rather than the `./data/postgres` directory: the cluster directory is sensitive to the PostgreSQL major version and locale, and grants should always come from the target host's own `.env`.
+
+The migration SQL is idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`) and `scripts/migrate.py` creates or alters the four service roles from environment variables on every run, so restoring a dump into an empty database and then running `mpf-migrate` reproduces roles and grants. All primary keys use `gen_random_uuid()` defaults, so there are no sequences to reset after a restore.
+
+### 1. Dump from the source host
+
+`mpf.jobs` is queue state and should not cross environments; `mpf-migrate` recreates it on the target. `--no-owner --no-privileges` prevents the dump from referencing role names that may not exist on the target.
+
+```bash
+cd ~/Workspaces/MPF-Tracker
+U=$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2-)
+D=$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2-)
+docker exec mpf-tracker-mpf-db-1 pg_dump -U "$U" -d "$D" -Fc \
+  --no-owner --no-privileges -T mpf.jobs -f /tmp/mpf-dev.dump
+docker cp mpf-tracker-mpf-db-1:/tmp/mpf-dev.dump ./mpf-dev.dump
+scp ./mpf-dev.dump <target-host>:~/mpf-tracker/
+```
+
+### 2. Restore on the target host
+
+Restore into an **empty** database. If the target already contains MPF tables from earlier testing, drop and recreate the database first; restoring on top of existing rows collides on the unique keys.
+
+```bash
+cd ~/mpf-tracker && git pull
+docker compose up -d mpf-db
+docker cp ./mpf-dev.dump mpf-tracker-mpf-db-1:/tmp/
+PU=$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2-)
+PD=$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2-)
+docker exec mpf-tracker-mpf-db-1 pg_restore -U "$PU" -d "$PD" --no-owner --no-privileges /tmp/mpf-dev.dump
+docker compose up -d   # runs mpf-migrate (roles and grants), then the APIs and worker
+```
+
+### 3. Verify
+
+```bash
+docker exec mpf-tracker-mpf-db-1 psql -U "$PU" -d "$PD" -Atc \
+  "SELECT 'accounts',count(*) FROM mpf.accounts UNION ALL SELECT 'prices',count(*) FROM mpf.fund_prices UNION ALL SELECT 'snapshots',count(*) FROM mpf.portfolio_snapshots"
+curl -fsS http://<target-host>:8002/health
+```
+
+Compare the counts against the source host before cutover.
+
+### Environment file on the target
+
+- New `POSTGRES_PASSWORD` and the four `*_DB_PASSWORD` values are fine; `mpf-migrate` creates the roles and re-grants permissions.
+- Keep `POSTGRES_DB` matching the database name used at restore time.
+- Set a target `API_KEY` distinct from the development value.
+- The external network named by `N8N_NETWORK` must exist on the target; Compose requires it, and that is where a container-based scheduler attaches.
+
+### After cutover
+
+Stop the source worker (`docker compose stop mpf-crawler-worker`) so two workers do not crawl the providers independently, and repoint the scheduler at the target host. Keep the source stack running until the target has completed one full sync → purchase → snapshot cycle, so it remains available as a rollback.
+
 ## Development and testing
 
 Local development uses Node.js 22, npm, and Python 3.12, matching the container and CI runtimes. Install dependencies from the repository root:

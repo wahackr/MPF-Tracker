@@ -8,6 +8,8 @@ const state = {
   allocations: [],
   plans: [],
   contributionHistory: [],
+  confirmingEventId: null,
+  confirmingDate: null,
   reconciliations: [],
   funds: new Map(),
   snapshotHistory: [],
@@ -146,8 +148,12 @@ function renderTable(containerSelector, columns, rows, emptyMessage) {
     const tr = document.createElement("tr");
     for (const column of columns) {
       const td = document.createElement("td");
-      const value = column.format ? column.format(row[column.key], row) : row[column.key];
-      td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+      if (column.render) {
+        column.render(td, row);
+      } else {
+        const value = column.format ? column.format(row[column.key], row) : row[column.key];
+        td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+      }
       if (column.className) td.className = column.className;
       tr.append(td);
     }
@@ -275,6 +281,14 @@ function renderAccountWorkspace() {
       { label: t("col.stream"), key: "contribution_stream" },
       { label: t("col.contribution"), key: "amount", format: (value) => money.format(Number(value)) },
       { label: t("col.status"), key: "status", format: statusLabel },
+      { label: t("col.actual_details"), render: (cell, event) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "text-button";
+        button.textContent = event.status === "CONFIRMED" ? t("btn.edit_actual") : t("btn.enter_actual");
+        button.addEventListener("click", () => openConfirmationEditor(event));
+        cell.append(button);
+      } },
       {
         label: t("col.fund_transactions"),
         key: "transactions",
@@ -341,6 +355,9 @@ async function selectAccount(accountId) {
     state.allocations = allocations.items;
     state.plans = plans.items;
     state.contributionHistory = contributionHistory.items;
+    state.confirmingEventId = null;
+    state.confirmingDate = null;
+    $("#confirmation-editor").hidden = true;
     state.reconciliations = reconciliations.items;
     state.snapshotHistory = [];
     state.funds = new Map();
@@ -484,6 +501,70 @@ function resetFundRows(containerId) {
   container.replaceChildren();
   addFundRow(containerId);
   updateAllocationTotal();
+}
+
+function addConfirmationRow(transaction = {}) {
+  addFundRow("confirmation-rows");
+  const row = $("#confirmation-rows").lastElementChild;
+  row.classList.add("confirmation-row");
+  const fundId = transaction.fund_id ?? "";
+  row.querySelector('[name="fund_id"]').value = fundId;
+  row.querySelector('input[type="search"]').value = fundId ? fundName(fundId) : "";
+
+  const field = (name, label, type, value) => {
+    const input = document.createElement("input");
+    input.name = name;
+    input.type = type;
+    input.value = value ?? "";
+    input.required = true;
+    input.setAttribute("aria-label", label);
+    if (type === "number") {
+      input.min = "0";
+      input.step = "any";
+    }
+    return input;
+  };
+  const units = row.querySelector('[name="units_delta"]');
+  units.value = transaction.units_delta ?? "";
+  units.setAttribute("aria-label", t("confirm.units_aria"));
+  row.insertBefore(field("trade_date", t("col.trade_date"), "date", transaction.trade_date ?? state.confirmingDate), units);
+  row.insertBefore(field("cash_amount", t("col.cash_amount"), "number", transaction.cash_amount), units);
+  row.insertBefore(field("unit_price", t("col.unit_price"), "number", transaction.unit_price), units);
+}
+
+function openConfirmationEditor(event) {
+  state.confirmingEventId = event.event_id;
+  state.confirmingDate = dateOnly(event.transactions[0]?.trade_date ?? event.expected_date);
+  $("#confirmation-event-label").textContent = t("confirm.event_label", {
+    stream: event.contribution_stream,
+    date: dateOnly(event.expected_date),
+    status: statusLabel(event.status)
+  });
+  $("#confirmation-rows").replaceChildren();
+  for (const transaction of event.transactions) addConfirmationRow(transaction);
+  if (event.transactions.length === 0) addConfirmationRow();
+  $("#confirmation-editor").hidden = false;
+  $("#confirmation-editor").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function readConfirmationRows() {
+  const rows = [...document.querySelectorAll("#confirmation-rows .confirmation-row")].map((row) => {
+    const value = (name) => row.querySelector(`[name="${name}"]`).value.trim();
+    return {
+      fund_id: value("fund_id"),
+      trade_date: value("trade_date"),
+      cash_amount: value("cash_amount"),
+      unit_price: value("unit_price"),
+      units_delta: value("units_delta")
+    };
+  });
+  if (rows.length === 0 || rows.some((row) => Object.values(row).some((value) => !value))) {
+    throw new Error(t("error.confirmation_rows_incomplete"));
+  }
+  if (new Set(rows.map((row) => row.fund_id)).size !== rows.length) {
+    throw new Error(t("error.confirmation_fund_duplicate"));
+  }
+  return rows;
 }
 
 function updateAllocationTotal() {
@@ -724,6 +805,30 @@ function registerForms() {
       button.disabled = false;
       button.textContent = t("btn.refresh_history");
     }
+  });
+
+  $("#add-confirmation-row").addEventListener("click", () => addConfirmationRow());
+  $("#cancel-confirmation").addEventListener("click", () => {
+    state.confirmingEventId = null;
+    state.confirmingDate = null;
+    $("#confirmation-editor").hidden = true;
+  });
+  $("#confirmation-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitForm(event.currentTarget, async () => {
+      const accountId = selectedAccountId();
+      if (!state.confirmingEventId) throw new Error(t("error.confirmation_event_required"));
+      const transactions = readConfirmationRows();
+      await api(`/v1/accounts/${accountId}/contribution-history/${encodeURIComponent(state.confirmingEventId)}/confirm`, {
+        method: "POST",
+        body: JSON.stringify({
+          trade_date: transactions[0].trade_date,
+          transactions
+        })
+      });
+      await selectAccount(accountId);
+      showToast(t("toast.purchase_confirmed"));
+    });
   });
 
   $("#load-valuation").addEventListener("click", async (event) => {

@@ -710,6 +710,12 @@ select:focus {
   background: var(--red);
 }
 
+.button-secondary {
+  color: var(--ink);
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+}
+
 .button-small {
   min-height: 34px;
   padding: 6px 14px;
@@ -749,6 +755,39 @@ select:focus {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(110px, 0.32fr) 36px;
   gap: 9px;
+}
+
+.form-help {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirmation-columns,
+.repeat-row.confirmation-row {
+  display: grid;
+  grid-template-columns: minmax(190px, 2fr) minmax(130px, 1fr) repeat(3, minmax(100px, 1fr)) 36px;
+  gap: 9px;
+  align-items: center;
+}
+
+.confirmation-columns {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .confirmation-columns { display: none; }
+  .repeat-row.confirmation-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .confirmation-row .fund-picker { grid-column: 1 / -1; }
+  .confirmation-row .remove-row { justify-self: end; }
 }
 
 .fund-picker {
@@ -990,6 +1029,16 @@ tr:last-child td {
 }
 
 @media (max-width: 480px) {
+  .repeat-row.confirmation-row > input[type="number"] {
+    grid-row: auto;
+  }
+
+  .repeat-row.confirmation-row .remove-row {
+    grid-column: auto;
+    grid-row: auto;
+    height: auto;
+  }
+
   .repeat-row {
     grid-template-columns: 1fr 36px;
   }

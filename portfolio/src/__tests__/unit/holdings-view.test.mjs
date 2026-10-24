@@ -44,7 +44,7 @@ function dashboard(funds) {
   const source = readFileSync(new URL("../../../public/app.js", import.meta.url), "utf8")
     .replace(/^import .*from "\.\/i18n\.js";\n/m, "")
     .replace(/^initialize\(\);$/m, "");
-  vm.runInContext(source + "\nglobalThis.view = { state, loadHoldingsChart };", context);
+  vm.runInContext(source + "\nglobalThis.view = { state, loadHoldingsChart, renderAllocations };", context);
   const view = context.view;
   view.state.selectedAccount = { account_id: "hsbc", currency: "HKD" };
   view.state.holdings = [{ ...sold, units: "30544.28" }, { ...equity, units: "3352.7576" }];
@@ -83,4 +83,39 @@ test("failed refresh clears previous balances and reports current holdings as un
   expect(view.element("#current-holdings-message").textContent).toContain("holdings.load_failed");
   expect(view.state.holdingsChart).toBeNull();
   expect(view.element("#holding-count").textContent).toBe("—");
+});
+
+
+test("replaced allocations appear as expired history and only active rules are counted", () => {
+  const view = dashboard([]);
+  view.state.allocations = [
+    { fund_id: "old-fund", weight: "100", effective_from: "2026-09-01", effective_to: "2026-10-23" },
+    { fund_id: "new-fund-a", weight: "40", effective_from: "2026-10-24", effective_to: null },
+    { fund_id: "new-fund-b", weight: "60", effective_from: "2026-10-24", effective_to: null }
+  ];
+  view.renderAllocations(new Date("2026-10-23T16:00:00Z"));
+  const current = view.element("#allocations-table").textContent;
+  expect(current).toContain("allocation.active");
+  expect(current).toContain("new-fund-a");
+  expect(current).toContain("new-fund-b");
+  expect(current).not.toContain("old-fund");
+  const history = view.element("#allocation-history-table").textContent;
+  expect(history).toContain("old-fund");
+  expect(history).toContain("allocation.expired");
+  expect(view.element("#allocation-history").hidden).toBe(false);
+  expect(view.element("#allocation-count").textContent).toBe("2");
+});
+
+test("end dates are inclusive and future allocations stay scheduled until Hong Kong midnight", () => {
+  const view = dashboard([]);
+  view.state.allocations = [
+    { fund_id: "old-fund", weight: "100", effective_from: "2026-09-01", effective_to: "2026-10-23" },
+    { fund_id: "new-fund", weight: "100", effective_from: "2026-10-24", effective_to: null }
+  ];
+  view.renderAllocations(new Date("2026-10-23T15:59:59Z"));
+  const current = view.element("#allocations-table").textContent;
+  expect(current).toContain("allocation.active");
+  expect(current).toContain("allocation.scheduled");
+  expect(view.element("#allocation-count").textContent).toBe("1");
+  expect(view.element("#allocation-history").hidden).toBe(true);
 });

@@ -128,7 +128,7 @@
                 <article class="metric-card">
                   <span data-i18n="metric.allocations">Allocation rules</span>
                   <strong id="allocation-count">0</strong>
-                  <small data-i18n="metric.allocations_note">Current and historical</small>
+                  <small data-i18n="metric.allocations_note">Active rules only</small>
                 </article>
                 <article class="metric-card">
                   <span data-i18n="metric.plans">Contribution plans</span>
@@ -299,10 +299,14 @@
                 <div>
                   <span class="eyebrow" data-i18n="allocations.eyebrow">Contribution routing</span>
                   <h3 data-i18n="allocations.title">Allocation rules</h3>
-                  <p data-i18n="allocations.desc">A complete rule set must allocate exactly 100%.</p>
+                  <p data-i18n="allocations.desc">Each contribution stream must allocate exactly 100%. Expired rules appear in history.</p>
                 </div>
               </div>
               <div id="allocations-table" class="table-wrap"></div>
+              <details id="allocation-history" hidden>
+                <summary data-i18n="allocation.history">Expired allocation rules</summary>
+                <div id="allocation-history-table" class="table-wrap"></div>
+              </details>
 
               <article class="form-card">
                 <div class="card-heading">

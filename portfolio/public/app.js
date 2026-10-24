@@ -198,6 +198,39 @@ function renderAccountList() {
   }
 }
 
+function renderAllocations(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(now);
+  const part = (type) => parts.find((item) => item.type === type).value;
+  const today = `${part("year")}-${part("month")}-${part("day")}`;
+  const rules = state.allocations.map((rule) => ({
+    ...rule,
+    allocation_status: rule.effective_to && dateOnly(rule.effective_to) < today ? "expired"
+      : dateOnly(rule.effective_from) > today ? "scheduled" : "active"
+  }));
+  const columns =
+    [
+      { label: t("col.status"), key: "allocation_status", format: (value) => t(`allocation.${value}`) },
+      { label: t("col.from"), key: "effective_from", format: dateOnly },
+      { label: t("col.to"), key: "effective_to", format: dateOnly },
+      { label: t("col.stream"), key: "contribution_stream" },
+      { label: t("col.fund"), key: "fund_id", format: fundName },
+      {
+        label: t("col.weight"),
+        key: "weight",
+        format: (value) => `${formatNumber(value)}%`,
+        className: "value-positive"
+      }
+    ];
+  const expired = rules.filter((rule) => rule.allocation_status === "expired");
+  renderTable("#allocations-table", columns,
+    rules.filter((rule) => rule.allocation_status !== "expired"), t("empty.current_allocations"));
+  renderTable("#allocation-history-table", columns, expired, t("empty.allocations"));
+  $("#allocation-history").hidden = expired.length === 0;
+  $("#allocation-count").textContent = String(rules.filter((rule) => rule.allocation_status === "active").length);
+}
+
 function renderAccountWorkspace() {
   const account = state.selectedAccount;
   if (!account) return;
@@ -211,7 +244,6 @@ function renderAccountWorkspace() {
   $("#account-active").textContent = account.active ? t("common.active") : t("account.inactive");
   $("#holding-count").textContent = state.currentHoldings
     ? String(state.currentHoldings.funds.length) : "—";
-  $("#allocation-count").textContent = String(state.allocations.length);
   $("#plan-count").textContent = String(state.plans.length);
 
   const updateForm = $("#update-account-form");
@@ -251,23 +283,7 @@ function renderAccountWorkspace() {
     t("empty.reconciliations")
   );
 
-  renderTable(
-    "#allocations-table",
-    [
-      { label: t("col.from"), key: "effective_from", format: dateOnly },
-      { label: t("col.to"), key: "effective_to", format: dateOnly },
-      { label: t("col.stream"), key: "contribution_stream" },
-      { label: t("col.fund"), key: "fund_id", format: fundName },
-      {
-        label: t("col.weight"),
-        key: "weight",
-        format: (value) => `${formatNumber(value)}%`,
-        className: "value-positive"
-      }
-    ],
-    state.allocations,
-    t("empty.allocations")
-  );
+  renderAllocations();
 
   renderTable(
     "#plans-table",

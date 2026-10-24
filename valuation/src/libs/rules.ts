@@ -3,7 +3,7 @@ import { Decimal } from "decimal.js";
 export type HoldingRow = {
   account_id: string;
   fund_id: string;
-  effective_date: string;
+  effective_date: string | null;
   units: string;
   verification_status: string;
   confirmed_delta: string;
@@ -15,7 +15,7 @@ export type PriceInfo = { price_date: Date | string; price: string; price_type: 
 export type FundPayload = {
   fund_id: string;
   units: string;
-  baseline_date: string;
+  baseline_date: string | null;
   baseline_verification_status: string;
   units_status: "ESTIMATED" | "VERIFIED";
   price_date: string | null;
@@ -64,6 +64,8 @@ export function valueHolding(
     market_value: null,
     price_status: "MISSING"
   };
+  // A closed position has zero value even when its old fund has no usable price.
+  if (units.eq(0)) return { ...fund, market_value: "0.00000000" };
   if (!priceInfo) return fund;
 
   const priceDate = isoDate(priceInfo.price_date);

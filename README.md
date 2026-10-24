@@ -241,6 +241,19 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 - **Body parameters:** `effective_date`; optional `notes`; `holdings[]` (at least one) with `fund_id` and `units`.
 - **Returns:** `200 {account_id, effective_date, inserted_baselines: N}`.
 
+#### `GET /v1/accounts/{account_id}/switches`
+- **Purpose:** list completed fund switches, newest trade date first.
+- **Returns:** `200 {account_id, items: [{switch_id, trade_date, sales: [{fund_id, units}], purchases: [{fund_id, units}], notes, created_at}]}`.
+
+#### `POST /v1/accounts/{account_id}/switches`
+- **Purpose:** record an actual, completed switch selling one or more funds and buying one or more funds in the same account. Use the dashboard's **Switch funds** tab, or submit the actual units from your provider statement.
+- **Body:** `switch_id` (client-generated UUID), `trade_date` (`YYYY-MM-DD`), `sales` and `purchases` (each 1–100 entries with `fund_id` and positive decimal-string `units`, up to 14 integer and 10 fractional digits), optional `notes` (up to 2000 characters).
+- **Returns:** `201 {switch_id, created: true}`. Repeating the same ID and values (regardless of fund-row order) returns `200 {switch_id, created: false}`; different values with that ID return `409`.
+- All funds must match the account's provider and currency; select funds eligible for its scheme. Recorded baselines, confirmed contributions, and earlier switches determine available units. Estimated contributions cannot fund a switch. Insufficient units (including at a later recorded switch) return `400` and roll back the operation.
+- The original one-to-one request fields (`from_fund_id`, `to_fund_id`, `units_sold`, `units_bought`) are still accepted for existing clients; responses use the grouped `sales`/`purchases` format. Migration `003_switch_legs.sql` preserves earlier switch records and converts them into legs.
+- Baselines represent end-of-day balances. If any selected fund already has a baseline on the trade date, returns `409`; use reconciliation for those end-of-day balances instead.
+- Switches preserve an append-only history and invalidate saved valuations from the trade date. They do not create contributions or change future contribution allocations. Record all selling and buying funds in one operation with one trade date. Each fund may appear once across both lists; units across different funds are not summed or required to match. Every leg saves atomically, with one invalidation. Correct later actual balances through reconciliation.
+
 #### `GET /v1/valuation/latest`
 - **Purpose:** proxy the on-demand valuation from the Valuation API for the dashboard.
 - **Query parameter:** `account_id` (required UUID; missing returns `400 {"detail":"account_id query parameter is required"}`).
@@ -303,11 +316,11 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 
 ## Calculation behavior and limits
 
-- **Holdings:** valuation starts from the latest baseline per account and fund on or before the requested date, then adds purchase transactions strictly after that baseline and through the requested date. Funds without a baseline are excluded.
+- **Holdings:** valuation starts from the latest baseline per account and fund on or before the requested date, then adds purchase transactions strictly after that baseline and through the requested date. Confirmed switch units are also added or subtracted after that baseline. A switch into a new fund establishes its holdings without requiring a zero baseline; subsequent contributions are included from the first switch date. Other funds without a baseline are excluded. Zero-unit positions have zero value even without a price.
 - **Purchase estimates:** processing handles the month containing `as_of_date`; repeat with dates in earlier months to process missed periods. Expected days beyond a month's length are clamped to month end. Estimates select the first price row on or after the expected date, within 14 days and no later than `as_of_date`, and use its bid price. A missing or nonpositive bid prevents estimation. Missing prices produce `WAITING_FOR_PRICE`; missing or invalid allocations produce `FAILED_REVIEW`. Confirmed events are skipped on subsequent processing.
 - **Valuation prices:** the latest price row on or before the requested date supplies its bid price. Missing or nonpositive bids leave the holding unpriced. Prices more than three calendar days old are marked `STALE`.
 - **Completeness:** an unpriced fund makes the result `PARTIAL`, with `total_value: null` and a separate `priced_subtotal`. Estimated units are included by default and identified in fund details. `COMPLETE` describes price completeness and freshness; it does not mean all units are verified.
-- **Snapshots:** live valuation queries calculate without saving. Snapshot writes persist per-account results and increment revisions on replacement. Changes to prices, baselines, or purchases enqueue invalidation requests; snapshot/rebuild operations consume them. Rebuild recalculates existing snapshot dates and does not fill every missing calendar date.
+- **Snapshots:** live valuation queries calculate without saving. Snapshot writes persist per-account results and increment revisions on replacement. Changes to prices, baselines, purchases, or fund switches enqueue invalidation requests; snapshot/rebuild operations consume them. Rebuild recalculates existing snapshot dates and does not fill every missing calendar date.
 - **Currency:** current valuation results use HKD and perform no foreign-exchange conversion, even though account records accept other currency codes.
 - **Providers:** HSBC fetches the `HB` scheme and splits long ranges into 28-day requests. Manulife fetches each fund's history and filters it to the requested range. A real `SHK122` history response is stored as a fixture; broader Manulife production backfill still needs live validation.
 
@@ -337,12 +350,12 @@ TypeScript services use `index.ts` to start the server, `app.ts` to wire middlew
 
 ### Database write ownership
 
-All service roles can read shared tables. Writes are restricted by [the SQL schema](./migrations/sql/001_init_schema.sql):
+All service roles can read shared tables. Writes are restricted by [the SQL migrations](./migrations/sql/):
 
 | Owner | Tables in schema `mpf` |
 | --- | --- |
 | Crawler | `funds`, `fund_aliases`, `fund_scheme_memberships`, `fund_prices`, `jobs` |
-| Portfolio | `accounts`, `holdings_baselines`, `allocation_rules`, `contribution_plans`, `reconciliation_records` |
+| Portfolio | `accounts`, `holdings_baselines`, `allocation_rules`, `contribution_plans`, `reconciliation_records`, `fund_switches` and `fund_switch_legs` (insert only) |
 | Purchase | `contribution_events`, `purchase_transactions` |
 | Valuation | `portfolio_snapshots`, `snapshot_fund_values` |
 | Shared invalidation contract | Crawler/portfolio/purchase insert `snapshot_invalidation_requests`; valuation processes them |

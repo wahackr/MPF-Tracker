@@ -1053,3 +1053,14 @@ tr:last-child td {
     height: 100%;
   }
 }
+
+.baseline-history summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.baseline-history > p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}

@@ -16,6 +16,7 @@ let accountId;
 let accountIds;
 let fundId;
 let secondFundId;
+let fixtureFundIds;
 let planId;
 let eventId;
 let globalInvalidationId;
@@ -48,6 +49,7 @@ beforeEach(async () => {
   accountIds = [accountId];
   fundId = `TEST:${randomUUID()}`;
   secondFundId = `TEST:${randomUUID()}`;
+  fixtureFundIds = [fundId, secondFundId];
   planId = randomUUID();
   eventId = randomUUID();
   globalInvalidationId = null;
@@ -103,8 +105,8 @@ afterEach(async () => {
   // Only remove rows created by this test; account deletion cascades through snapshots and trades.
   if (globalInvalidationId) await database.query("DELETE FROM mpf.snapshot_invalidation_requests WHERE invalidation_id = $1", [globalInvalidationId]);
   await database.query("DELETE FROM mpf.accounts WHERE account_id = ANY($1::uuid[])", [accountIds]);
-  await database.query("DELETE FROM mpf.fund_prices WHERE fund_id = ANY($1::text[])", [[fundId, secondFundId]]);
-  await database.query("DELETE FROM mpf.funds WHERE fund_id = ANY($1::text[])", [[fundId, secondFundId]]);
+  await database.query("DELETE FROM mpf.fund_prices WHERE fund_id = ANY($1::text[])", [fixtureFundIds]);
+  await database.query("DELETE FROM mpf.funds WHERE fund_id = ANY($1::text[])", [fixtureFundIds]);
 });
 
 afterAll(async () => {
@@ -421,4 +423,93 @@ test("HTTP endpoints reject missing authentication and invalid dates", async () 
   expect(unauthorized.status).toBe(401);
   expect(invalidDate.status).toBe(400);
   expect(invalidPayload.status).toBe(400);
+});
+
+async function savedSwitch(date = '2026-10-16', sold = '40', bought = '20') {
+  const switchId = randomUUID();
+  await database.query(`INSERT INTO mpf.fund_switches (switch_id, account_id, trade_date)
+    VALUES ($1, $2, $3)`, [switchId, accountId, date]);
+  await database.query(`INSERT INTO mpf.fund_switch_legs (switch_id, fund_id, side, units)
+    VALUES ($1, $2, 'SOLD', $4), ($1, $3, 'BOUGHT', $5)`, [switchId, fundId, secondFundId, sold, bought]);
+  await database.query(`INSERT INTO mpf.fund_prices (fund_id, price_date, bid, offer, source, fetched_at)
+    VALUES ($1, '2026-10-16', 20, 20, 'test', NOW())`, [secondFundId]);
+}
+
+test('switches debit and credit exactly once, including a new fund without a baseline', async () => {
+  await savedSwitch();
+  const before = await calculatePortfolioAsOf('2026-10-15', accountId);
+  expect(before.accounts[0].funds).toHaveLength(1);
+  expect(before.accounts[0].funds[0].units).toBe('105.0000000000');
+  const after = await calculatePortfolioAsOf('2026-10-16', accountId);
+  const funds = new Map(after.accounts[0].funds.map((f) => [f.fund_id, f]));
+  expect(funds.get(fundId).units).toBe('65.0000000000');
+  expect(funds.get(secondFundId)).toMatchObject({ units: '20.0000000000', baseline_date: null, units_status: 'VERIFIED' });
+  expect(after.total_value).toBe('1050.00000000');
+  const confirmed = await calculatePortfolioAsOf('2026-10-16', accountId, false);
+  expect(confirmed.accounts[0].funds.find((f) => f.fund_id === fundId).units).toBe('62.0000000000');
+});
+
+test('later and same-day reconciliations supersede switch legs without double counting', async () => {
+  await savedSwitch();
+  await database.query(`INSERT INTO mpf.holdings_baselines
+    (account_id, fund_id, effective_date, units, source, verification_status)
+    VALUES ($1, $2, '2026-10-16', 66, 'reconciliation', 'VERIFIED'),
+           ($1, $3, '2026-10-17', 21, 'reconciliation', 'VERIFIED')`, [accountId, fundId, secondFundId]);
+  const result = await calculatePortfolioAsOf('2026-10-17', accountId);
+  const funds = new Map(result.accounts[0].funds.map((f) => [f.fund_id, f]));
+  expect(funds.get(fundId).units).toBe('66.0000000000');
+  expect(funds.get(secondFundId).units).toBe('21.0000000000');
+});
+
+test('fully switched-out positions have zero value even without a source price', async () => {
+  await savedSwitch('2026-10-16', '105', '50');
+  await database.query('DELETE FROM mpf.fund_prices WHERE fund_id=$1', [fundId]);
+  const result = await calculatePortfolioAsOf('2026-10-16', accountId);
+  expect(result.calculation_status).toBe('COMPLETE');
+  expect(result.total_value).toBe('1000.00000000');
+});
+
+test('contributions after a switch into a new fund are included', async () => {
+  await savedSwitch();
+  await database.query(`INSERT INTO mpf.purchase_transactions
+    (event_id, fund_id, trade_date, cash_amount, unit_price, units_delta, status, estimation_policy)
+    VALUES ($1, $2, '2026-10-17', 40, 20, 2, 'CONFIRMED', 'confirmed')`, [eventId, secondFundId]);
+  const result = await calculatePortfolioAsOf('2026-10-17', accountId);
+  expect(result.accounts[0].funds.find((f) => f.fund_id === secondFundId).units).toBe('22.0000000000');
+  await persistSnapshot(result);
+  const snapshot = await snapshotHistory(undefined, undefined, accountId);
+  expect(snapshot[0].total_value).toBe(result.total_value);
+});
+
+test('a many-to-many switch values every leg once and respects later per-fund reconciliation', async () => {
+  const boughtIds = [randomUUID(), randomUUID()].map((id) => `TEST:${id}`);
+  fixtureFundIds.push(...boughtIds);
+  await database.query(`INSERT INTO mpf.funds (fund_id, provider, provider_fund_code, name, currency)
+    SELECT id, 'test', id, 'New fund', 'HKD' FROM unnest($1::text[]) id`, [boughtIds]);
+  await database.query(`INSERT INTO mpf.holdings_baselines
+    (account_id, fund_id, effective_date, units, source, verification_status)
+    VALUES ($1, $2, '2026-10-01', 80, 'test', 'VERIFIED')`, [accountId, secondFundId]);
+  const switchId = randomUUID();
+  await database.query(`INSERT INTO mpf.fund_switches (switch_id, account_id, trade_date)
+    VALUES ($1, $2, '2026-10-16')`, [switchId, accountId]);
+  await database.query(`INSERT INTO mpf.fund_switch_legs (switch_id, fund_id, side, units)
+    VALUES ($1, $2, 'SOLD', 105), ($1, $3, 'SOLD', 80), ($1, $4, 'BOUGHT', 30), ($1, $5, 'BOUGHT', 50)`,
+    [switchId, fundId, secondFundId, ...boughtIds]);
+  await database.query(`INSERT INTO mpf.fund_prices (fund_id, price_date, bid, offer, source, fetched_at)
+    VALUES ($1, '2026-10-16', 20, 20, 'test', NOW()), ($2, '2026-10-16', 10, 10, 'test', NOW())`, boughtIds);
+  const before = await calculatePortfolioAsOf('2026-10-15', accountId);
+  expect(before.accounts[0].funds).toHaveLength(2);
+  const after = await calculatePortfolioAsOf('2026-10-16', accountId);
+  const funds = new Map(after.accounts[0].funds.map((fund) => [fund.fund_id, fund]));
+  expect(funds.get(fundId).units).toBe('0.0000000000');
+  expect(funds.get(secondFundId).units).toBe('0.0000000000');
+  expect(funds.get(boughtIds[0]).units).toBe('30.0000000000');
+  expect(funds.get(boughtIds[1]).units).toBe('50.0000000000');
+  expect(after.total_value).toBe('1100.00000000');
+  await persistSnapshot(after);
+  await database.query(`INSERT INTO mpf.holdings_baselines
+    (account_id, fund_id, effective_date, units, source, verification_status)
+    VALUES ($1, $2, '2026-10-17', 47, 'reconciliation', 'VERIFIED')`, [accountId, boughtIds[1]]);
+  const reconciled = await calculatePortfolioAsOf('2026-10-17', accountId);
+  expect(reconciled.total_value).toBe('1070.00000000');
 });

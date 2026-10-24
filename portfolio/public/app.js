@@ -5,6 +5,8 @@ const state = {
   accounts: [],
   selectedAccount: null,
   holdings: [],
+  switches: [],
+  switchRequestId: null,
   allocations: [],
   plans: [],
   contributionHistory: [],
@@ -15,6 +17,8 @@ const state = {
   snapshotHistory: [],
   valuation: null,
   holdingsChart: null,
+  currentHoldings: null,
+  currentHoldingsMessageKey: "chart.holdings_hint",
   connectionStatus: { key: "status.not_connected", kind: "neutral" },
   valuationMessageKey: "valuation.hint",
   chartMessageKey: "chart.loading"
@@ -205,9 +209,8 @@ function renderAccountWorkspace() {
   $("#account-scheme").textContent = account.scheme;
   $("#account-currency").textContent = account.currency;
   $("#account-active").textContent = account.active ? t("common.active") : t("account.inactive");
-  $("#holding-count").textContent = String(
-    state.holdings.filter((holding) => holding.source !== "reconciliation").length
-  );
+  $("#holding-count").textContent = state.currentHoldings
+    ? String(state.currentHoldings.funds.length) : "—";
   $("#allocation-count").textContent = String(state.allocations.length);
   $("#plan-count").textContent = String(state.plans.length);
 
@@ -217,7 +220,7 @@ function renderAccountWorkspace() {
   updateForm.elements.active.checked = account.active;
 
   renderTable(
-    "#holdings-table",
+    "#baseline-history-table",
     [
       { label: t("col.effective_date"), key: "effective_date", format: dateOnly },
       { label: t("col.fund"), key: "fund_id", format: fundName },
@@ -225,9 +228,17 @@ function renderAccountWorkspace() {
       { label: t("col.status"), key: "verification_status", format: statusLabel },
       { label: t("col.source"), key: "source" }
     ],
-    state.holdings.filter((holding) => holding.source !== "reconciliation"),
+    state.holdings,
     t("empty.holdings")
   );
+  renderCurrentHoldings();
+
+  renderTable("#switches-table", [
+    { label: t("switch.date"), key: "trade_date", format: dateOnly },
+    { label: t("switch.sold"), key: "sales", format: (legs) => legs.map((leg) => `${fundName(leg.fund_id)}: ${formatNumber(leg.units)}`).join(" · ") },
+    { label: t("switch.bought"), key: "purchases", format: (legs) => legs.map((leg) => `${fundName(leg.fund_id)}: ${formatNumber(leg.units)}`).join(" · ") },
+    { label: t("col.notes"), key: "notes" }
+  ], state.switches, t("switch.empty"));
 
   renderTable(
     "#reconciliations-table",
@@ -342,15 +353,24 @@ async function loadAccounts({ selectId } = {}) {
 
 async function selectAccount(accountId) {
   try {
-    const [account, holdings, allocations, plans, reconciliations, contributionHistory] = await Promise.all([
+    const [account, holdings, allocations, plans, reconciliations, contributionHistory, switches] = await Promise.all([
       api(`/v1/accounts/${accountId}`),
       api(`/v1/accounts/${accountId}/holdings`),
       api(`/v1/accounts/${accountId}/allocation-rules`),
       api(`/v1/accounts/${accountId}/contribution-plans`),
       api(`/v1/accounts/${accountId}/reconciliations`),
-      api(`/v1/accounts/${accountId}/contribution-history`)
+      api(`/v1/accounts/${accountId}/contribution-history`),
+      api(`/v1/accounts/${accountId}/switches`)
     ]);
+    if (state.selectedAccount?.account_id !== accountId) {
+      state.switchRequestId = null;
+      $("#switch-form").reset();
+      resetFundRows("switch-from-rows");
+      resetFundRows("switch-to-rows");
+      setDefaultDates();
+    }
     state.selectedAccount = account;
+    state.switches = switches.items;
     state.holdings = holdings.items;
     state.allocations = allocations.items;
     state.plans = plans.items;
@@ -362,6 +382,7 @@ async function selectAccount(accountId) {
     state.snapshotHistory = [];
     state.funds = new Map();
     const fundIds = [
+      ...switches.items.flatMap((item) => [...item.sales, ...item.purchases].map((leg) => leg.fund_id)),
       ...holdings.items.map((holding) => holding.fund_id),
       ...allocations.items.map((allocation) => allocation.fund_id),
       ...reconciliations.items.flatMap((item) => item.holdings.map((holding) => holding.fund_id)),
@@ -370,6 +391,8 @@ async function selectAccount(accountId) {
     await loadFundNames(fundIds);
     state.valuation = null;
     state.holdingsChart = null;
+    state.currentHoldings = null;
+    state.currentHoldingsMessageKey = "chart.holdings_hint";
     $("#valuation-results").hidden = true;
     $("#valuation-message").hidden = false;
     setValuationMessage("valuation.hint");
@@ -377,6 +400,7 @@ async function selectAccount(accountId) {
     $("#holdings-chart-message").hidden = false;
     setChartMessage("chart.holdings_hint");
     renderAccountWorkspace();
+    await loadHoldingsChart();
   } catch (error) {
     showToast(errorMessage(error), "error");
   }
@@ -478,11 +502,13 @@ function addFundRow(containerId) {
   remove.textContent = "×";
   remove.addEventListener("click", () => {
     row.remove();
+    if (containerId.startsWith("switch-")) state.switchRequestId = null;
     updateAllocationTotal();
   });
 
   row.append(picker, value, remove);
   container.append(row);
+  if (containerId.startsWith("switch-")) state.switchRequestId = null;
 }
 
 function readFundRows(containerId, valueName) {
@@ -592,6 +618,27 @@ function setDefaultDates() {
   }
 }
 
+function renderCurrentHoldings() {
+  const holdings = state.currentHoldings;
+  const message = $("#current-holdings-message");
+  if (!holdings) {
+    $("#holdings-table").replaceChildren();
+    message.textContent = t(state.currentHoldingsMessageKey ?? "chart.holdings_hint");
+    return;
+  }
+  message.textContent = t("holdings.as_of", { date: dateOnly(holdings.requestedAsOf) });
+  $("#holding-count").textContent = String(holdings.funds.length);
+  const money = moneyFormatter(holdings.currency);
+  renderTable("#holdings-table", [
+    { label: t("col.fund"), key: "fund_id", format: fundName },
+    { label: t("col.units"), key: "units", format: formatNumber },
+    { label: t("col.value"), key: "market_value", format: (value) => value === null ? "—" : money.format(Number(value)) },
+    { label: t("col.price_date"), key: "price_date", format: dateOnly },
+    { label: t("col.units_status"), key: "units_status", format: statusLabel },
+    { label: t("col.price_status"), key: "price_status", format: statusLabel }
+  ], holdings.funds, t("holdings.empty_current"));
+}
+
 function renderHoldingsChart() {
   const chart = state.holdingsChart;
   if (!chart) return;
@@ -643,11 +690,27 @@ async function loadHoldingsChart() {
   content.hidden = true;
   message.hidden = false;
   setChartMessage("chart.loading_values");
+  state.holdingsChart = null;
+  state.currentHoldings = null;
+  state.currentHoldingsMessageKey = "chart.loading_values";
+  $("#holding-count").textContent = "—";
+  renderCurrentHoldings();
   try {
     const result = await api(`/v1/valuation/latest?account_id=${encodeURIComponent(accountId)}`);
     if (state.selectedAccount?.account_id !== accountId) return;
     const account = result.accounts?.find((item) => item.account_id === accountId);
-    const pricedFunds = (account?.funds ?? [])
+    // Current balances come from valuation, which applies baselines, trades and switches.
+    // Keep unpriced positions visible; a fully sold fund belongs only in history.
+    const currentFunds = (account?.funds ?? []).filter((fund) => Number(fund.units) !== 0);
+    await loadFundNames(currentFunds.map((fund) => fund.fund_id)).catch(() => { });
+    if (state.selectedAccount?.account_id !== accountId) return;
+    state.currentHoldings = {
+      requestedAsOf: result.requested_as_of,
+      currency: account?.currency ?? state.selectedAccount.currency,
+      funds: currentFunds
+    };
+    renderCurrentHoldings();
+    const pricedFunds = currentFunds
       .filter((fund) => fund.market_value !== null && Number(fund.market_value) > 0)
       .map((fund) => ({ ...fund, value: Number(fund.market_value) }));
     const pricedTotal = pricedFunds.reduce((sum, fund) => sum + fund.value, 0);
@@ -657,8 +720,6 @@ async function loadHoldingsChart() {
       return;
     }
 
-    await loadFundNames(pricedFunds.map((fund) => fund.fund_id)).catch(() => { });
-    if (state.selectedAccount?.account_id !== accountId) return;
     const colors = ["#0071e1", "#af5815", "#248a3d", "#8b5fcf", "#c93f6b", "#0a86a8", "#5e8c3a", "#6e6e73"];
     let cursor = 0;
     const slices = pricedFunds.map((fund, index) => {
@@ -680,6 +741,8 @@ async function loadHoldingsChart() {
     if (state.selectedAccount?.account_id === accountId) {
       state.chartMessageKey = null;
       message.textContent = errorMessage(error);
+      state.currentHoldingsMessageKey = "holdings.load_failed";
+      renderCurrentHoldings();
     }
   } finally {
     button.disabled = false;
@@ -900,6 +963,35 @@ function registerForms() {
     });
   });
 
+  // Keep the request identity after errors so a lost response can be retried safely.
+  $("#switch-form").addEventListener("input", () => { state.switchRequestId = null; });
+  $("#switch-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    submitForm(form, async () => {
+      const accountId = selectedAccountId();
+      const sales = readFundRows("switch-from-rows", "units");
+      const purchases = readFundRows("switch-to-rows", "units");
+      const fundIds = [...sales, ...purchases].map((leg) => leg.fund_id);
+      if (new Set(fundIds).size !== fundIds.length) throw new Error(t("switch.unique_funds"));
+      // getRandomValues also works on the LAN's HTTP dashboard.
+      state.switchRequestId ??= "10000000-1000-4000-8000-100000000000".replace(/[018]/g,
+        (digit) => (Number(digit) ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> Number(digit) / 4).toString(16));
+      await api(`/v1/accounts/${accountId}/switches`, {
+        method: "POST",
+        body: JSON.stringify({ switch_id: state.switchRequestId, trade_date: form.elements.trade_date.value,
+          sales, purchases, notes: form.elements.notes.value.trim() })
+      });
+      state.switchRequestId = null;
+      form.reset();
+      resetFundRows("switch-from-rows");
+      resetFundRows("switch-to-rows");
+      setDefaultDates();
+      await selectAccount(accountId);
+      showToast(t("switch.saved"));
+    });
+  });
+
   $("#baseline-form").addEventListener("submit", (event) => {
     event.preventDefault();
     submitForm(event.currentTarget, async () => {
@@ -1006,6 +1098,8 @@ async function initialize() {
   registerTabs();
   registerForms();
   resetFundRows("baseline-rows");
+  resetFundRows("switch-from-rows");
+  resetFundRows("switch-to-rows");
   resetFundRows("allocation-rows");
   resetFundRows("reconciliation-rows");
   setDefaultDates();

@@ -5,6 +5,7 @@ import { registerHoldingsRoutes } from "./routes/holdings.js";
 import { registerAllocationsRoutes } from "./routes/allocations.js";
 import { registerPlansRoutes } from "./routes/plans.js";
 import { registerReconciliationsRoutes } from "./routes/reconciliations.js";
+import { registerSwitchesRoutes } from "./routes/switches.js";
 
 export function portfolioRouter(): Router {
   const router = Router();
@@ -77,6 +78,7 @@ export function portfolioRouter(): Router {
   registerAllocationsRoutes(router);
   registerPlansRoutes(router);
   registerReconciliationsRoutes(router);
+  registerSwitchesRoutes(router);
   /**
    * GET /v1/valuation/latest
    * Proxies the latest on-demand valuation from the Valuation API for display

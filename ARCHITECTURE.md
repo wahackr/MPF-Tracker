@@ -59,7 +59,7 @@ portfolio/
   public/                       Dashboard HTML, CSS, and browser JavaScript
   src/
     index.ts, app.ts, main.ts    Listener, application wiring, router composition
-    routes/                     Accounts, holdings, allocations, plans, reconciliation
+    routes/                     Accounts, holdings, allocations, plans, reconciliation, fund switches
     libs/                       Authentication, SQL, schemas, decimal validation
     __tests__/unit/
 purchase/src/
@@ -75,7 +75,7 @@ scripts/migrate.py              Role setup and ordered SQL execution
 mpf-codex-handoff/fixtures/      Saved provider responses for deterministic tests
 ```
 
-TypeScript application wiring and domain operations stay within each service. Purchase and valuation isolate SQL in `libs/repository.ts` and arithmetic/date rules in `libs/rules.ts`. Portfolio routes perform their SQL operations using local database helpers. Provider adapters each own their fetch, parse, and persistence flow; they share HTTP retry and PostgreSQL helpers within the worker.
+TypeScript application wiring and domain operations stay within each service. Purchase keeps SQL in `main.ts`; valuation uses `main.ts` for holdings queries and `libs/repository.ts` for snapshots. Both keep arithmetic/date rules in `libs/rules.ts`. Portfolio routes perform their SQL operations using local database helpers. Provider adapters each own their fetch, parse, and persistence flow; they share HTTP retry and PostgreSQL helpers within the worker.
 
 ## Database contracts
 
@@ -84,7 +84,7 @@ TypeScript application wiring and domain operations stay within each service. Pu
 | Writer | Tables | Main relationships |
 | --- | --- | --- |
 | Crawler | `funds`, `fund_aliases`, `fund_scheme_memberships`, `fund_prices`, `jobs` | Prices are unique by fund and date; aliases and scheme memberships reference funds |
-| Portfolio | `accounts`, `holdings_baselines`, `allocation_rules`, `contribution_plans`, `reconciliation_records` | Account settings and dated holdings/allocation/plan inputs |
+| Portfolio | `accounts`, `holdings_baselines`, `allocation_rules`, `contribution_plans`, `reconciliation_records`, `fund_switches`, `fund_switch_legs` | Account settings and dated holdings/allocation/plan inputs |
 | Purchase | `contribution_events`, `purchase_transactions` | Events are unique by plan and month; transactions by event and fund |
 | Valuation | `portfolio_snapshots`, `snapshot_fund_values` | Snapshots are unique by account and date; fund values by account, date, and fund |
 | Shared contract | `snapshot_invalidation_requests` | Crawler, portfolio, and purchase can insert; valuation can process and update |
@@ -114,6 +114,8 @@ The portfolio service serves `public/` with Express and protects `/v1/*` with AP
 
 Portfolio owns account metadata and dated inputs. Allocation weights must total exactly `100`. Allocation and contribution-plan changes create versions with effective date ranges for a contribution stream. A reconciliation inserts an audit record and verified holdings baselines for the supplied funds, then requests snapshot invalidation in the same transaction.
 
+Completed fund switches are append-only portfolio inputs: `mpf.fund_switches` stores the account, trade date, notes and client UUID; `mpf.fund_switch_legs` stores each fund, sold/bought side and actual units. A switch has one or more funds on each side, with no repeated or overlapping fund IDs. Migration `003_switch_legs.sql` preserves earlier one-to-one records and backfills their legs idempotently. Original one-to-one POST payloads remain accepted; reads return sales/purchases arrays. An account row lock serializes switch submissions. Availability checks exclude estimated contributions and validate later recorded sales when a switch is backdated. All legs and one snapshot invalidation commit in one transaction. A same-day existing baseline requires reconciliation instead because baselines describe end-of-day balances. Future contribution allocations are independent. The dashboard also proxies actual contribution confirmation to Purchase.
+
 The holdings endpoint returns recorded baseline rows. The valuation service derives holdings as of a date. Dashboard valuation requests use portfolio proxy routes, which forward the API key to `VALUATION_API_URL`; portfolio does not duplicate the valuation calculations.
 
 ## Purchase processing
@@ -128,7 +130,7 @@ Confirmation records supplied actual transaction values and marks the event `CON
 
 ## Valuation and snapshot lifecycle
 
-For each account/fund, valuation selects the latest baseline on or before the requested date. It adds confirmed purchase units strictly after the baseline date and through the requested date, plus estimated units unless explicitly excluded. A fund without a baseline does not enter the calculation, including when it has purchase transactions.
+For each account/fund, valuation selects the latest baseline on or before the requested date. It adds confirmed purchase units strictly after the baseline date and through the requested date, plus estimated units unless explicitly excluded. Confirmed switch legs after the baseline also change units. Funds introduced by switches enter without an artificial baseline (`baseline_date: null`), with subsequent purchases included from the first switch date. Other funds without a baseline remain excluded. A later or same-day baseline supersedes the earlier switch legs. Zero-unit positions have zero value and do not require a price.
 
 The latest price row on or before the requested date supplies the bid price. Missing or nonpositive bids leave the fund unpriced. A price more than three calendar days old is stale. Calculation results distinguish price completeness from unit verification:
 
@@ -156,7 +158,7 @@ Users must provide their own scheduler or make API calls manually. The daily seq
 
 ## Test boundaries
 
-- TypeScript unit suites live under each service's `src/__tests__/unit/` and run through `npm test`, which builds the service before using Node's test runner.
+- TypeScript unit suites live under each service's `src/__tests__/unit/` and run through Jest via `npm test`, which builds the service and provisions a temporary PostgreSQL instance for integration tests; `npm run test:unit` skips database integration tests.
 - Python tests live under `crawler/worker/src/__tests__/`. Provider fixture tests mock `httpx.Client.request` using saved responses; some are located in `integration/` without the `integration` marker and belong to the offline suite.
 - Tests marked `integration` use `crawler/conftest.py` to build the Compose stack in the `mpf-itest` project, with separate database roles, an isolated network, and a temporary database volume. They require Docker and use the default application host ports.
 - Live provider smoke tests require `MPF_RUN_LIVE_TESTS=1`; they are excluded from routine offline testing. The stored Manulife `SHK122` history fixture supports deterministic parsing checks, while broader production backfill needs live validation.

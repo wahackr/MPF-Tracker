@@ -105,6 +105,7 @@
             <nav class="tabs" data-i18n-aria-label="tab.aria" aria-label="Portfolio sections">
               <button class="tab active" type="button" data-tab="overview" data-i18n="tab.overview">Overview</button>
               <button class="tab" type="button" data-tab="holdings" data-i18n="tab.holdings">Holdings</button>
+              <button class="tab" type="button" data-tab="switches" data-i18n="tab.switches">Switch funds</button>
               <button class="tab" type="button" data-tab="allocations" data-i18n="tab.allocations">Allocations</button>
               <button class="tab" type="button" data-tab="plans" data-i18n="tab.plans">Contributions</button>
               <button class="tab" type="button" data-tab="valuation" data-i18n="tab.valuation">Valuation</button>
@@ -207,8 +208,8 @@
               <div class="panel-heading">
                 <div>
                   <span class="eyebrow" data-i18n="holdings.eyebrow">Unit balances</span>
-                  <h3 data-i18n="holdings.title">Holding baselines</h3>
-                  <p data-i18n="holdings.desc">Each submission records fund units as of one effective date.</p>
+                  <h3 data-i18n="holdings.title">Current holdings</h3>
+                  <p data-i18n="holdings.desc">Current units and values include contributions, completed switches, and reconciliations.</p>
                 </div>
               </div>
               <article class="form-card holdings-allocation-card">
@@ -225,7 +226,18 @@
                   <ul id="holdings-legend" class="holdings-legend"></ul>
                 </div>
               </article>
-              <div id="holdings-table" class="table-wrap"></div>
+              <article class="form-card">
+                <div class="card-heading"><div>
+                  <h4 data-i18n="holdings.current_title">Current fund balances</h4>
+                  <p id="current-holdings-message" data-i18n="chart.holdings_hint">Open the Holdings tab to load the current allocation.</p>
+                </div></div>
+                <div id="holdings-table" class="table-wrap"></div>
+              </article>
+              <details class="form-card baseline-history">
+                <summary data-i18n="holdings.history_title">Historical baseline records</summary>
+                <p data-i18n="holdings.history_desc">Past balances for audit only. These rows are not current holdings and must not be added together.</p>
+                <div id="baseline-history-table" class="table-wrap"></div>
+              </details>
 
               <article class="form-card">
                 <div class="card-heading">
@@ -252,6 +264,32 @@
                   </div>
                   <div id="baseline-rows" class="repeat-rows" data-kind="units"></div>
                   <button class="button button-primary align-start" type="submit" data-i18n="btn.record_baseline">Record baseline</button>
+                </form>
+              </article>
+            </section>
+
+            <section class="tab-panel" data-panel="switches" hidden>
+              <div class="panel-heading"><div>
+                <h3 data-i18n="switch.title">Switch existing funds</h3>
+                <p data-i18n="switch.desc">Record a completed switch from your provider statement. Enter actual units sold and bought. Future contribution allocations stay unchanged.</p>
+              </div></div>
+              <div id="switches-table" class="table-wrap"></div>
+              <article class="form-card">
+                <form id="switch-form" class="stacked-form">
+                  <label><span data-i18n="switch.date">Trade date</span><input name="trade_date" type="date" required /></label>
+                  <div class="repeat-heading">
+                    <strong data-i18n="switch.sold">Funds sold — actual units</strong>
+                    <button class="text-button add-row" type="button" data-target="switch-from-rows" data-i18n="switch.add_sale">+ Add fund sold</button>
+                  </div>
+                  <div id="switch-from-rows" class="repeat-rows" data-kind="units"></div>
+                  <div class="repeat-heading">
+                    <strong data-i18n="switch.bought">Funds bought — actual units</strong>
+                    <button class="text-button add-row" type="button" data-target="switch-to-rows" data-i18n="switch.add_purchase">+ Add fund bought</button>
+                  </div>
+                  <div id="switch-to-rows" class="repeat-rows" data-kind="units"></div>
+                  <label><span data-i18n="col.notes">Notes</span><input name="notes" type="text" maxlength="2000" /></label>
+                  <p data-i18n="switch.hint">Use funds within this account's provider and scheme. Add every fund sold and bought as part of this switch; each fund may appear once. If you already entered end-of-day balances on this date, use reconciliation instead.</p>
+                  <button class="button button-primary align-start" type="submit" data-i18n="switch.save">Record switch</button>
                 </form>
               </article>
             </section>

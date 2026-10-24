@@ -31,13 +31,7 @@ export async function calculatePortfolioAsOf(
   staleAfterDays = 3
 ): Promise<CalculationResult> {
   // Load the latest baselines, transaction deltas and as-of prices in one database read.
-  const params: unknown[] = [asOfDate];
-  let accountFilter = "";
-
-  if (accountId) {
-    accountFilter = "AND hb.account_id = $2::uuid";
-    params.push(accountId);
-  }
+  const params: unknown[] = [asOfDate, accountId ?? null];
 
   const holdings = (await query<HoldingRow & {
     price_date: string | null;
@@ -58,26 +52,41 @@ export async function calculatePortfolioAsOf(
         ) AS rn
       FROM mpf.holdings_baselines hb
       WHERE hb.effective_date <= $1::date
-        ${accountFilter}
+        AND ($2::uuid IS NULL OR hb.account_id = $2::uuid)
+    ), switch_legs AS (
+      SELECT s.account_id, l.fund_id, s.trade_date,
+             CASE WHEN l.side = 'SOLD' THEN -l.units ELSE l.units END AS units
+      FROM mpf.fund_switches s JOIN mpf.fund_switch_legs l ON l.switch_id = s.switch_id
+      WHERE s.trade_date <= $1::date AND ($2::uuid IS NULL OR s.account_id = $2::uuid)
+    ), fund_keys AS (
+      SELECT account_id, fund_id FROM latest_baselines WHERE rn = 1
+      UNION
+      SELECT account_id, fund_id FROM switch_legs
     ), holdings AS (
-      SELECT
-        b.account_id::text,
-        b.fund_id,
-        b.effective_date::text,
-        b.units::text,
-        b.verification_status,
-        COALESCE(SUM(CASE WHEN pt.status = 'CONFIRMED' THEN pt.units_delta ELSE 0 END), 0)::text AS confirmed_delta,
-        COALESCE(SUM(CASE WHEN pt.status = 'ESTIMATED' THEN pt.units_delta ELSE 0 END), 0)::text AS estimated_delta
-      FROM latest_baselines b
-      LEFT JOIN mpf.contribution_plans cp ON cp.account_id = b.account_id
-      LEFT JOIN mpf.contribution_events ce ON ce.plan_id = cp.plan_id
-      LEFT JOIN mpf.purchase_transactions pt
-        ON pt.event_id = ce.event_id
-        AND pt.fund_id = b.fund_id
-        AND pt.trade_date > b.effective_date
-        AND pt.trade_date <= $1::date
-      WHERE b.rn = 1
-      GROUP BY b.account_id, b.fund_id, b.effective_date, b.units, b.verification_status
+      SELECT k.account_id::text, k.fund_id, b.effective_date::text,
+        COALESCE(b.units, 0)::text AS units,
+        COALESCE(b.verification_status, 'VERIFIED') AS verification_status,
+        (COALESCE(p.confirmed, 0) + COALESCE(s.units, 0))::text AS confirmed_delta,
+        COALESCE(p.estimated, 0)::text AS estimated_delta
+      FROM fund_keys k
+      LEFT JOIN latest_baselines b ON b.account_id = k.account_id AND b.fund_id = k.fund_id AND b.rn = 1
+      LEFT JOIN LATERAL (
+        SELECT SUM(CASE WHEN pt.status = 'CONFIRMED' THEN pt.units_delta ELSE 0 END) AS confirmed,
+               SUM(CASE WHEN pt.status = 'ESTIMATED' THEN pt.units_delta ELSE 0 END) AS estimated
+        FROM mpf.contribution_plans cp
+        JOIN mpf.contribution_events ce ON ce.plan_id = cp.plan_id
+        JOIN mpf.purchase_transactions pt ON pt.event_id = ce.event_id
+        WHERE cp.account_id = k.account_id AND pt.fund_id = k.fund_id
+          AND (pt.trade_date > b.effective_date OR (b.effective_date IS NULL AND pt.trade_date >= (
+            SELECT MIN(trade_date) FROM switch_legs first_switch
+            WHERE first_switch.account_id = k.account_id AND first_switch.fund_id = k.fund_id
+          ))) AND pt.trade_date <= $1::date
+      ) p ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT SUM(units) AS units FROM switch_legs sl
+        WHERE sl.account_id = k.account_id AND sl.fund_id = k.fund_id
+          AND sl.trade_date > COALESCE(b.effective_date, '-infinity'::date)
+      ) s ON TRUE
     )
     SELECT h.*, price.price_date::text, price.bid::text AS price, 'BID'::text AS price_type
     FROM holdings h

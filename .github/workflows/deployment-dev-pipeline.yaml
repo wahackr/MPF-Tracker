@@ -26,7 +26,6 @@ jobs:
       run:
         shell: bash
     env:
-      DOCKER_CONTEXT: ${{ vars.DOCKER_CONTEXT || 'dev' }}
       COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME || 'mpf-tracker-dev' }}
       MPF_INTERNAL_NETWORK: ${{ vars.MPF_INTERNAL_NETWORK || 'mpf-tracker-dev-internal' }}
       DB_MODE: ${{ vars.DB_MODE || 'shared' }}

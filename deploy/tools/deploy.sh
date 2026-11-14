@@ -6,7 +6,7 @@ stage=${1:-}
 case "$stage" in validate|build|deploy) ;; *) echo 'Usage: deploy.sh validate|build|deploy' >&2; exit 1 ;; esac
 
 # GitHub forbids empty variables; environment placeholders must be replaced before deployment.
-for key in DOCKER_CONTEXT COMPOSE_PROJECT_NAME MPF_INTERNAL_NETWORK DB_MODE API_BIND_ADDRESS \
+for key in COMPOSE_PROJECT_NAME MPF_INTERNAL_NETWORK DB_MODE API_BIND_ADDRESS \
   CRAWLER_API_HOST_PORT PORTFOLIO_API_HOST_PORT PURCHASE_API_HOST_PORT VALUATION_API_HOST_PORT \
   POSTGRES_DB POSTGRES_USER POSTGRES_BIND_ADDRESS POSTGRES_HOST_PORT POSTGRES_DATA_DIR \
   SHARED_POSTGRES_HOST SHARED_POSTGRES_PORT CRAWLER_DB_USER PORTFOLIO_DB_USER PURCHASE_DB_USER \
@@ -17,7 +17,7 @@ for key in DOCKER_CONTEXT COMPOSE_PROJECT_NAME MPF_INTERNAL_NETWORK DB_MODE API_
   fi
 done
 
-required=(DOCKER_CONTEXT COMPOSE_PROJECT_NAME MPF_INTERNAL_NETWORK DB_MODE API_KEY POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
+required=(COMPOSE_PROJECT_NAME MPF_INTERNAL_NETWORK DB_MODE API_KEY POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
   CRAWLER_DB_USER CRAWLER_DB_PASSWORD PORTFOLIO_DB_USER PORTFOLIO_DB_PASSWORD
   PURCHASE_DB_USER PURCHASE_DB_PASSWORD VALUATION_DB_USER VALUATION_DB_PASSWORD N8N_NETWORK)
 for key in "${required[@]}"; do
@@ -31,9 +31,12 @@ if ! [[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
   exit 1
 fi
 
+# Use the runner's local Docker socket; ignore inherited remote connection settings.
 # Never use an untracked .env or an inherited profile on a persistent runner.
 export COMPOSE_PROFILES=''
-compose=(docker --context "$DOCKER_CONTEXT" compose --env-file /dev/null -f deploy/compose.yaml)
+unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+export DOCKER_HOST=unix:///var/run/docker.sock
+compose=(docker compose --env-file /dev/null -f deploy/compose.yaml)
 case "$DB_MODE" in
   shared)
     if [[ -z "${SHARED_POSTGRES_HOST:-}" ]]; then
@@ -61,10 +64,9 @@ done
 
 case "$stage" in
   validate)
-    docker context inspect "$DOCKER_CONTEXT" >/dev/null
-    docker --context "$DOCKER_CONTEXT" info >/dev/null
-    docker --context "$DOCKER_CONTEXT" compose version
-    docker --context "$DOCKER_CONTEXT" network inspect "$N8N_NETWORK" >/dev/null
+    docker info >/dev/null
+    docker compose version
+    docker network inspect "$N8N_NETWORK" >/dev/null
     "${compose[@]}" config --quiet
     ;;
   build)

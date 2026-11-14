@@ -24,6 +24,9 @@ jobs:
       - name: Test deployment tooling
         run: node --test deploy/tools/*.test.cjs
 
+      - name: Test n8n workflows and deployment
+        run: node --test src/n8n/workflows.test.cjs deploy/n8n/*.test.cjs
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"

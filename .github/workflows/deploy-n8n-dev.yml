@@ -1,0 +1,24 @@
+name: Deploy n8n dev
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - src/n8n/**
+      - deploy/n8n/**
+      - deploy/tools/deployment-current.cjs
+      - deploy/tools/deployment-current.test.cjs
+      - .github/workflows/deploy-n8n-dev.yml
+      - .github/workflows/deploy-n8n.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-n8n.yml
+    secrets: inherit
+    with:
+      environment: dev
+      branch: development

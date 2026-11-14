@@ -403,7 +403,7 @@ The migration runner creates the configured database if missing, creates or upda
 
 The stack does not run recurring API requests automatically. Configure your own scheduler (for example, cron, a systemd timer, or an external automation service) to send the requests below with your configured `X-API-Key`. You can also run them manually.
 
-For n8n, import the [inactive workflow drafts](./src/n8n/README.md). The recommended daily workflow defaults to 06:00 Hong Kong time and waits for the crawl to succeed before processing purchases, rebuilding stale valuations, and saving a snapshot. Standalone drafts are included for manual recovery or custom schedules; set the API key in Configuration and review a manual run before activation.
+For n8n, import the [inactive workflow drafts](./src/n8n/README.md). The recommended daily workflow defaults to 06:00 Hong Kong time and waits for the crawl to succeed before processing purchases, rebuilding stale valuations, and saving a snapshot. Standalone drafts are included for manual recovery or custom schedules; set the API key in Configuration and review a manual run before activation. The [n8n CI/CD pipeline](./deploy/README.md#n8n-workflow-deployment) can update existing workflow definitions using environment settings and secrets.
 
 | Order | Request | Purpose |
 | --- | --- | --- |
@@ -516,14 +516,13 @@ Run tests without Docker or live provider requests:
 .venv/bin/python -m pytest -q -m 'not integration and not live'
 .venv/bin/python -m unittest discover -s src/migrations -p 'test_*.py'
 node --test deploy/tools/*.test.cjs
-node --test src/n8n/workflows.test.cjs
+node --test src/n8n/workflows.test.cjs deploy/n8n/deploy.test.cjs
 for service in src/crawler/api src/portfolio/backend src/purchase src/valuation; do
   (cd "$service" && npm run test:unit)
 done
 ```
 
-The migration bootstrap tests and the deployment-tooling checks are the extra suites CI
-runs alongside the service suites; the n8n draft checks are an offline check only.
+CI runs migration bootstrap, deployment-tooling, and offline n8n workflow/deployment checks alongside the service suites.
 
 Each TypeScript service also supports `npm run build` and `npm start`. For a host-run API, provide `API_KEY`, `PORT`, and its service database settings using `DB_HOST=127.0.0.1` and the published database port. A host-run portfolio service also needs `VALUATION_API_URL=http://localhost:8004`. The applications do not automatically load `.env`.
 

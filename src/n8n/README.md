@@ -1,7 +1,7 @@
 # n8n scheduling drafts
 
 Issue: [#26](https://github.com/wahackr/MPF-Tracker/issues/26).
-These are inactive JSON imports, not deployed workflows. No n8n service is added to Compose.
+These are inactive source drafts. The [n8n deployment pipeline](../../deploy/README.md#n8n-workflow-deployment) updates explicitly mapped workflows and injects the API key from Actions secrets. No n8n service is added to Compose.
 
 | Import | Use |
 | --- | --- |
@@ -14,7 +14,7 @@ Every draft has a Manual Trigger and a daily **06:00 Asia/Hong_Kong** Schedule T
 
 ## Import and configure
 
-1. Import the desired JSON using n8n's **Import from File** workflow menu. Drafts use built-in Schedule Trigger 1.2, Manual Trigger 1, HTTP Request 4.2, Edit Fields (Set) 3.4, Code 2, If 2.2, Wait 1.1, and Sticky Note 1 nodes. Use an n8n release supporting these versions; inspect imported nodes for warnings. These drafts have offline checks, but have not been imported or executed in a live n8n instance.
+1. Import the desired JSON using n8n's **Import from File** workflow menu. Drafts use built-in Schedule Trigger 1.2, Manual Trigger 1, HTTP Request 4.2, Edit Fields (Set) 3.4, Code 2, If 2.2, Wait 1.1, and Sticky Note 1 nodes. Use an n8n release supporting these versions; inspect imported nodes for warnings. The daily draft has been uploaded to dev n8n; offline checks do not replace a manual end-to-end run in the target environment.
 2. Set `apiKey` in the **Configuration** Edit Fields (Set) node to this stack's `API_KEY`. Every HTTP Request node uses **Authentication: None** and sends `X-API-Key` from that field. No separate n8n credential or environment-variable access is required. Source drafts contain only `CHANGE_ME`; keep real keys out of committed exports. The configured key is visible in workflow settings and execution data.
 3. Attach self-hosted n8n to the existing Compose `N8N_NETWORK` (default `automation`). For an existing container, for example: `docker network connect automation YOUR_N8N_CONTAINER`. Configure this network persistently in n8n's own Compose deployment as well. The defaults use `http://mpf-crawler-api:8000`, `http://mpf-purchase:8000`, and `http://mpf-valuation:8000`.
 4. Edit the **Configuration** Edit Fields (Set) node's settings if required. Each URL field contains the full endpoint path: `downloadUrl`, `purchaseUrl`, `rebuildUrl`, and `snapshotUrl`. `crawlJobUrl` contains the full `/v1/crawl/jobs/` path with a trailing slash; the polling node appends only the returned job ID. Standalone drafts include only their own endpoint URLs. External n8n installations need reachable URLs for the published API ports (`8001`, `8003`, `8004` by default); `localhost` inside n8n refers to n8n itself. Leave `accountId` empty for all accounts, or supply one UUID. Set `provider` (`all`, `hsbc`, `manulife`), `rollingDays` (1–28), and `maxPolls` (positive integer). The defaults sync both providers over seven days and allow 60 status checks.

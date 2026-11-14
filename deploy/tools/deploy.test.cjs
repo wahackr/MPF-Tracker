@@ -1,0 +1,73 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { mkdtempSync, readFileSync, writeFileSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { resolve, join } = require('node:path');
+const { spawnSync } = require('node:child_process');
+const root = resolve(__dirname, '../..');
+const defaults = Object.fromEntries(readFileSync(join(root, 'deploy/.env.example'), 'utf8').split('\n')
+  .filter(line => line && !line.startsWith('#')).map(line => line.split(/=(.*)/s).slice(0, 2)));
+for (const key of Object.keys(defaults)) {
+  if (key.endsWith('PASSWORD') || key === 'API_KEY') defaults[key] = 'test-value';
+}
+function run(stage, changes = {}) {
+  const directory = mkdtempSync(join(tmpdir(), 'mpf-deploy-test-'));
+  const log = join(directory, 'calls');
+  writeFileSync(join(directory, 'docker'), `#!/usr/bin/env bash
+printf '%s\\n' "$* profiles=$COMPOSE_PROFILES" >> "$TEST_DOCKER_LOG"
+if [[ "\${TEST_FAIL_UP:-}" == 1 && "$*" == *" up "* ]]; then exit 1; fi
+`, { mode: 0o755 });
+  try {
+    const result = spawnSync('bash', ['deploy/tools/deploy.sh', stage], {
+      cwd: root, encoding: 'utf8', env: {
+        ...process.env, ...defaults, DOCKER_CONTEXT: 'dev', COMPOSE_PROJECT_NAME: 'mpf-test',
+        MPF_INTERNAL_NETWORK: 'mpf-test-internal', DB_MODE: 'shared',
+        SHARED_POSTGRES_HOST: 'shared.example', TEST_DOCKER_LOG: log,
+        COMPOSE_PROFILES: 'bundled-db', ...changes, PATH: `${directory}:${process.env.PATH}`,
+      },
+    });
+    let calls = '';
+    try { calls = readFileSync(log, 'utf8'); } catch { /* Validation may fail before Docker runs. */ }
+    return { ...result, calls };
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+test('validates shared mode against the chosen context without local env files or inherited profiles', () => {
+  const result = run('validate');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.calls, /--context dev compose --env-file \/dev\/null -f deploy\/compose.yaml -f deploy\/compose.shared-db.yaml config --quiet profiles=\n/);
+  assert.match(result.calls, /--context dev network inspect automation/);
+});
+test('builds bundled mode without the shared override', () => {
+  const result = run('build', { DB_MODE: 'bundled', POSTGRES_DATA_DIR: '/srv/mpf-test/postgres' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.calls, /build --pull/);
+  assert.doesNotMatch(result.calls, /compose.shared-db.yaml/);
+});
+test('deployment waits for health and migration without rebuilding', () => {
+  const result = run('deploy');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.calls, /up -d --no-build --wait --wait-timeout 180/);
+  assert.match(result.calls, /ps -a/);
+});
+test('failed readiness fails the deployment', () => {
+  const result = run('deploy', { TEST_FAIL_UP: '1' });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Deployment failed/);
+});
+for (const [name, changes] of [
+  ['environment placeholder', { N8N_NETWORK: 'CHANGE_ME' }],
+  ['missing API secret', { API_KEY: '' }],
+  ['placeholder password', { POSTGRES_PASSWORD: 'REPLACE_ME' }],
+  ['missing shared host', { SHARED_POSTGRES_HOST: '' }],
+  ['unknown mode', { DB_MODE: 'other' }],
+  ['bad project', { COMPOSE_PROJECT_NAME: 'Bad project' }],
+  ['bad port', { PURCHASE_API_HOST_PORT: '0' }],
+  ['relative storage', { DB_MODE: 'bundled', POSTGRES_DATA_DIR: './data' }],
+  ['checkout storage', { DB_MODE: 'bundled', POSTGRES_DATA_DIR: join(root, 'data/postgres') }],
+]) {
+  test(`rejects ${name} before calling Docker`, () => {
+    const result = run('validate', changes);
+    assert.equal(result.status, 1);
+    assert.equal(result.calls, '');
+  });
+}

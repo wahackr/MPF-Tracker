@@ -1,0 +1,50 @@
+# Apply after compose.yaml to use an existing PostgreSQL server.
+# Requires Docker Compose 2.24.4+ for !override and !reset.
+x-shared-db: &shared-db
+  DB_HOST: ${SHARED_POSTGRES_HOST:?Set SHARED_POSTGRES_HOST to the shared PostgreSQL hostname}
+  DB_PORT: ${SHARED_POSTGRES_PORT:-5432}
+
+x-app-dependencies: &app-dependencies
+  mpf-migrate:
+    condition: service_completed_successfully
+
+services:
+  # Excluded from normal startup in this mode; no bundled database is created.
+  mpf-db:
+    profiles: [bundled-db]
+
+  mpf-migrate:
+    depends_on: !reset {}
+    environment:
+      POSTGRES_HOST: ${SHARED_POSTGRES_HOST:?Set SHARED_POSTGRES_HOST to the shared PostgreSQL hostname}
+      POSTGRES_PORT: ${SHARED_POSTGRES_PORT:-5432}
+
+  mpf-crawler-api:
+    depends_on: !override
+      <<: *app-dependencies
+    environment:
+      <<: *shared-db
+
+  mpf-crawler-worker:
+    depends_on: !override
+      <<: *app-dependencies
+    environment:
+      <<: *shared-db
+
+  mpf-portfolio:
+    depends_on: !override
+      <<: *app-dependencies
+    environment:
+      <<: *shared-db
+
+  mpf-purchase:
+    depends_on: !override
+      <<: *app-dependencies
+    environment:
+      <<: *shared-db
+
+  mpf-valuation:
+    depends_on: !override
+      <<: *app-dependencies
+    environment:
+      <<: *shared-db

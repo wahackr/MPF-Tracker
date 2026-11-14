@@ -37,7 +37,7 @@ The four APIs listen on port `8000` inside their containers. Compose publishes t
 ## Source organization
 
 ```text
-crawler/
+src/crawler/
   api/src/
     index.ts                    Start the HTTP listener
     app.ts                      Middleware, health endpoint, error handling
@@ -55,23 +55,26 @@ crawler/
                                 Provider fetch, parsing, and persistence
       pgsql/main.py             SQLAlchemy engine and transaction helpers
     __tests__/{unit,integration,live}/
-portfolio/
-  public/                       Dashboard HTML, CSS, and browser JavaScript
-  src/
+src/portfolio/
+  frontend/                     Dashboard HTML, CSS, and browser JavaScript
+  backend/src/
     index.ts, app.ts, main.ts    Listener, application wiring, router composition
     routes/                     Accounts, holdings, allocations, plans, reconciliation
     libs/                       Authentication, SQL, schemas, decimal validation
     __tests__/unit/
-purchase/src/
+src/purchase/src/
   index.ts, app.ts, main.ts      Listener, routes/schemas, purchase operations
   libs/                         Authentication, SQL, repository, calculation rules
   __tests__/unit/
-valuation/src/
+src/valuation/src/
   index.ts, app.ts, main.ts      Listener, routes/schemas, valuation calculation
   libs/                         Authentication, SQL, repository, valuation rules
   __tests__/unit/
-migrations/sql/                 Shared schema, constraints, indexes, and grants
-scripts/migrate.py              Role setup and ordered SQL execution
+src/migrations/sql/             Shared schema, constraints, indexes, and grants
+src/migrations/migrate.py       Role setup and ordered SQL execution
+deploy/compose.yaml            Service deployment and networks
+deploy/docker/                 Per-service Dockerfiles
+deploy/.env.example            Deployment configuration template
 mpf-codex-handoff/fixtures/      Saved provider responses for deterministic tests
 ```
 
@@ -79,7 +82,7 @@ TypeScript application wiring and domain operations stay within each service. Pu
 
 ## Database contracts
 
-[The migration SQL](./migrations/sql/001_init_schema.sql) defines the shared `mpf` schema. All four application database roles have read access to its tables. Write grants establish module ownership:
+[The migration SQL](./src/migrations/sql/001_init_schema.sql) defines the shared `mpf` schema. All four application database roles have read access to its tables. Write grants establish module ownership:
 
 | Writer | Tables | Main relationships |
 | --- | --- | --- |
@@ -110,7 +113,7 @@ HSBC fetches the `HB` scheme's all-funds CSV, splitting long ranges into 28-day 
 
 ## Portfolio and dashboard
 
-The portfolio service serves `public/` with Express and protects `/v1/*` with API-key authentication. The browser stores the supplied key in session storage and sends it on API requests.
+The portfolio service serves `src/portfolio/frontend/` with Express and protects `/v1/*` with API-key authentication. The browser stores the supplied key in session storage and sends it on API requests.
 
 Portfolio owns account metadata and dated inputs. Allocation weights must total exactly `100`. Allocation and contribution-plan changes create versions with effective date ranges for a contribution stream. A reconciliation inserts an audit record and verified holdings baselines for the supplied funds, then requests snapshot invalidation in the same transaction.
 
@@ -148,7 +151,7 @@ Invalidation rows carry an optional account and date bounds. Valuation marks mat
 
 ## Deployment and scheduling
 
-[Compose](./compose.yaml) starts PostgreSQL, waits for its readiness check, runs migration, then starts the APIs and crawler worker. PostgreSQL persists under `./data/postgres`. All services join `mpf-internal`; the APIs also join the external network named by `N8N_NETWORK`.
+[Compose](./deploy/compose.yaml) starts PostgreSQL, waits for its readiness check, runs migration, then starts the APIs and crawler worker. PostgreSQL persists under `./data/postgres`. All services join `mpf-internal`; the APIs also join the external network named by `N8N_NETWORK`. The optional `deploy/compose.shared-db.yaml` override excludes the bundled database and connects migration and application containers to `SHARED_POSTGRES_HOST:SHARED_POSTGRES_PORT`. In this mode the target database already exists, and the migration account manages the application roles, schema, and grants before the apps start.
 
 API `/health` endpoints return readiness based on a database query and require no key. The worker container health check also checks database connectivity; it does not prove that its polling loop or a provider endpoint is healthy.
 
@@ -157,7 +160,7 @@ Users must provide their own scheduler or make API calls manually. The daily seq
 ## Test boundaries
 
 - TypeScript unit suites live under each service's `src/__tests__/unit/` and run through `npm test`, which builds the service before using Node's test runner.
-- Python tests live under `crawler/worker/src/__tests__/`. Provider fixture tests mock `httpx.Client.request` using saved responses; some are located in `integration/` without the `integration` marker and belong to the offline suite.
-- Tests marked `integration` use `crawler/conftest.py` to build the Compose stack in the `mpf-itest` project, with separate database roles, an isolated network, and a temporary database volume. They require Docker and use the default application host ports.
+- Python tests live under `src/crawler/worker/src/__tests__/`. Provider fixture tests mock `httpx.Client.request` using saved responses; some are located in `integration/` without the `integration` marker and belong to the offline suite.
+- Tests marked `integration` use `src/crawler/conftest.py` to build the Compose stack in the `mpf-itest` project, with separate database roles, an isolated network, and a temporary database volume. They require Docker and use the default application host ports.
 - Live provider smoke tests require `MPF_RUN_LIVE_TESTS=1`; they are excluded from routine offline testing. The stored Manulife `SHK122` history fixture supports deterministic parsing checks, while broader production backfill needs live validation.
 - [GitHub Actions](./.github/workflows/test.yml) runs offline Python and TypeScript tests, then the Docker integration suite on pushes and pull requests.

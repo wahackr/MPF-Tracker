@@ -83,7 +83,7 @@ PostgreSQL data persists in `./data/postgres`. `docker compose --env-file .env -
 
 The default command above starts all containers, including PostgreSQL. To use an existing server, apply [`deploy/compose.shared-db.yaml`](./deploy/compose.shared-db.yaml) after the base file (Docker Compose 2.24.4+).
 
-Create a dedicated database on that server first, then configure your root `.env`:
+Configure your root `.env` with the existing server and the application database to create:
 
 ```dotenv
 SHARED_POSTGRES_HOST=postgres.example.internal
@@ -93,7 +93,7 @@ POSTGRES_USER=mpf_migrator
 POSTGRES_PASSWORD=your_migration_password
 ```
 
-Set all four service roles and passwords as well. The migration account must be able to create/alter those roles, create the `mpf` schema and `pgcrypto` extension, and apply the schema and grants. PostgreSQL roles are server-wide; choose distinct service role names when sharing a server with other MPF deployments. The migration runner updates passwords for the configured roles.
+Set all four service roles and passwords as well. The migration runner connects to the server's existing `postgres` database and creates `POSTGRES_DB` if missing, then connects to that application database to create/update roles and apply migrations. The migration account needs access to `postgres` and `CREATEDB` permission when the application database is missing. It must also be able to create/alter service roles, create the `mpf` schema and `pgcrypto` extension, and apply the schema and grants. PostgreSQL roles are server-wide; choose distinct service role names when sharing a server with other MPF deployments. The migration runner updates passwords for the configured roles.
 
 The hostname must be reachable from the application containers. `localhost` refers to each container itself. For a PostgreSQL container on another Docker network, expose it at a reachable server address. Keep the external `N8N_NETWORK` setup from the quick start.
 
@@ -389,7 +389,7 @@ All service roles can read shared tables. Writes are restricted by [the SQL sche
 | Valuation | `portfolio_snapshots`, `snapshot_fund_values` |
 | Shared invalidation contract | Crawler/portfolio/purchase insert `snapshot_invalidation_requests`; valuation processes them |
 
-The migration runner creates or updates service login roles and executes sorted SQL files from `src/migrations/sql/`. It reruns the files on invocation; migrations must remain safe to reapply.
+The migration runner creates the configured database if missing, creates or updates service login roles, and executes sorted SQL files from `src/migrations/sql/`. It reruns the files on invocation; migrations must remain safe to reapply.
 
 ## Schedule requests yourself
 

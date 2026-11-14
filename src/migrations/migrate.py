@@ -5,6 +5,7 @@ from pathlib import Path
 
 import sqlparse
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 
 ROLE_ENV_MAP = {
@@ -22,13 +23,43 @@ def _require_env(name: str) -> str:
     return value
 
 
-def _build_admin_database_url() -> str:
+def _build_admin_database_url(database: str | None = None) -> URL:
     user = _require_env("POSTGRES_USER")
     password = _require_env("POSTGRES_PASSWORD")
     host = _require_env("POSTGRES_HOST")
     port = _require_env("POSTGRES_PORT")
+    return URL.create(
+        "postgresql+psycopg",
+        username=user,
+        password=password,
+        host=host,
+        port=int(port),
+        database=database if database is not None else _require_env("POSTGRES_DB"),
+    )
+
+
+def _ensure_database() -> None:
     database = _require_env("POSTGRES_DB")
-    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
+    # CREATE DATABASE cannot run inside a transaction or connect to a missing DB.
+    engine = create_engine(
+        _build_admin_database_url("postgres"),
+        isolation_level="AUTOCOMMIT",
+        pool_pre_ping=True,
+    )
+    try:
+        with engine.connect() as connection:
+            exists = connection.execute(
+                text("SELECT 1 FROM pg_database WHERE datname = :database"),
+                {"database": database},
+            ).first()
+            if not exists:
+                quoted_database = connection.dialect.identifier_preparer.quote_identifier(
+                    database
+                )
+                connection.exec_driver_sql(f"CREATE DATABASE {quoted_database}")
+                print(f"Created database: {database}")
+    finally:
+        engine.dispose()
 
 
 def _ensure_roles(engine) -> None:
@@ -81,10 +112,14 @@ def _apply_sql_migrations(engine) -> None:
 
 
 def main() -> None:
+    _ensure_database()
     admin_url = _build_admin_database_url()
     engine = create_engine(admin_url, future=True, pool_pre_ping=True)
-    _ensure_roles(engine)
-    _apply_sql_migrations(engine)
+    try:
+        _ensure_roles(engine)
+        _apply_sql_migrations(engine)
+    finally:
+        engine.dispose()
     print("Migration completed successfully.")
 
 

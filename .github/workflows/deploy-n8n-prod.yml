@@ -1,0 +1,24 @@
+name: Deploy n8n prod
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - src/n8n/**
+      - deploy/n8n/**
+      - deploy/tools/deployment-current.cjs
+      - deploy/tools/deployment-current.test.cjs
+      - .github/workflows/deploy-n8n-prod.yml
+      - .github/workflows/deploy-n8n.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-n8n.yml
+    secrets: inherit
+    with:
+      environment: prod
+      branch: master

@@ -39,3 +39,22 @@ for (const filename of ['src/n8n/daily-pipeline.json', 'deploy/n8n/deploy.cjs', 
 test('n8n detects a workflow moved out of source', async () => {
   assert.equal(await isCurrent({ github: github('newer', { status: 'ahead', files: [{ filename: 'archive/pipeline.json', previous_filename: 'src/n8n/daily-pipeline.json' }] }), context, kind: 'n8n' }), false);
 });
+
+test('production checks master rather than development', async () => {
+  let requestedRef;
+  const client = github('release');
+  client.rest.git.getRef = async args => {
+    requestedRef = args.ref;
+    return { data: { object: { sha: 'release' } } };
+  };
+  assert.equal(await isCurrent({ github: client, context, branch: 'master' }), true);
+  assert.equal(requestedRef, 'heads/master');
+});
+for (const [kind, filename] of [
+  ['compose', '.github/workflows/deployment-prod-pipeline.yaml'],
+  ['n8n', '.github/workflows/deploy-n8n-prod.yml'],
+]) {
+  test(`production skips superseded ${filename}`, async () => {
+    assert.equal(await isCurrent({ github: github('newer', { status: 'ahead', files: [{ filename }] }), context, branch: 'master', kind }), false);
+  });
+}

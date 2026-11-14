@@ -26,6 +26,7 @@ jobs:
       run:
         shell: bash
     env:
+      N8N_ENV: ${{ inputs.environment }}
       N8N_URL: ${{ vars.N8N_API_ENDPOINT }}
       N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
       N8N_WORKFLOW_IDS: ${{ vars.N8N_WORKFLOW_IDS }}

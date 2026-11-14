@@ -1,10 +1,12 @@
-const paths = ['src/', 'deploy/', '.github/workflows/deployment-dev-pipeline.yaml'];
+const paths = ['src/', 'deploy/', '.github/workflows/deployment-dev-pipeline.yaml',
+  '.github/workflows/deployment-prod-pipeline.yaml'];
 
 // Permit newer documentation-only commits, but never deploy superseded application code.
 module.exports = async ({ github, context, branch = 'development', kind = 'compose' }) => {
   const selected = kind === 'n8n' ? ['src/n8n/', 'deploy/n8n/',
     'deploy/tools/deployment-current.cjs', 'deploy/tools/deployment-current.test.cjs',
-    '.github/workflows/deploy-n8n.yml', '.github/workflows/deploy-n8n-dev.yml'] : paths;
+    '.github/workflows/deploy-n8n.yml', '.github/workflows/deploy-n8n-dev.yml',
+    '.github/workflows/deploy-n8n-prod.yml'] : paths;
   if (!['compose', 'n8n'].includes(kind)) throw new Error('Unknown deployment kind');
   const relevant = name => typeof name === 'string' && selected.some(path =>
     path.endsWith('/') ? name.startsWith(path) : name === path);

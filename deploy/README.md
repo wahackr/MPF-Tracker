@@ -106,3 +106,42 @@ node --test src/n8n/workflows.test.cjs deploy/n8n/deploy.test.cjs deploy/tools/*
 ```
 
 With the same variables/secrets exported, `node deploy/n8n/deploy.cjs --dry-run` reads target workflows and writes a redacted preview without updating them.
+
+## Production deployment
+
+The production copies use `master` and GitHub environment `prod` on the same self-hosted Docker runner as dev:
+
+- [deployment-prod-pipeline.yaml](../.github/workflows/deployment-prod-pipeline.yaml) builds and deploys the production Compose stack.
+- [deploy-n8n-prod.yml](../.github/workflows/deploy-n8n-prod.yml) calls the shared n8n deployment job for production.
+
+Both support manual runs on `master` and deploy matching pushes to that branch. Configure the `prod` environment before promoting a release to `master`; GitHub environment settings are separate from `dev` and are not copied automatically.
+
+Production uses the same variable and secret names documented above. Its defaults isolate the stack on the shared Docker host:
+
+| Setting | Production default |
+| --- | --- |
+| `COMPOSE_PROJECT_NAME` | `mpf-tracker-prod` |
+| `MPF_INTERNAL_NETWORK` | `mpf-tracker-prod-internal` |
+| `POSTGRES_DB` | `mpf_prod` |
+| Service database roles | `mpf_prod_crawler`, `mpf_prod_portfolio`, `mpf_prod_purchase`, `mpf_prod_valuation` |
+| API host ports | `8001`, `8002`, `8003`, `8004` (dev uses `38001`–`38004`) |
+| `N8N_NETWORK` | `mpf-tracker-prod-automation` |
+| `DB_MODE` | `shared` |
+
+Set production `POSTGRES_USER`, `POSTGRES_PASSWORD`, `SHARED_POSTGRES_HOST`, and the four service-role passwords for the intended PostgreSQL server. Use a separate production `API_KEY`. If using bundled PostgreSQL, set an independent persistent `POSTGRES_DATA_DIR` such as `/srv/mpf-tracker-prod/postgres` and a host port that does not overlap any existing database.
+
+Keep the production automation network separate from dev's `automation`: both stacks have the same Compose service names, so a shared automation network can make service-name routing ambiguous. Connect production n8n persistently to `mpf-tracker-prod-automation`, or use the production host's published ports for all endpoint URLs.
+
+For production n8n, set `N8N_API_ENDPOINT`, secret `N8N_API_KEY`, and `N8N_WORKFLOW_IDS` for the intended production instance and its own imported workflow IDs. Do not reuse the dev workflow ID. `N8N_ENDPOINT_URLS` must explicitly contain all five full endpoint URLs in production; no source-host defaults are accepted. With host-port routing on the current Docker host:
+
+```json
+{
+  "downloadUrl": "http://10.7.7.79:8001/v1/crawl/jobs/sync",
+  "crawlJobUrl": "http://10.7.7.79:8001/v1/crawl/jobs/",
+  "purchaseUrl": "http://10.7.7.79:8003/v1/purchases/process",
+  "rebuildUrl": "http://10.7.7.79:8004/v1/valuation/rebuild",
+  "snapshotUrl": "http://10.7.7.79:8004/v1/valuation/snapshot"
+}
+```
+
+The n8n and container deployments remain separate pipelines. Verify the production APIs and manually check the imported inactive daily workflow before its first schedule activation. Later n8n deployments preserve that activation state and retain the same redacted recovery artifacts as dev.

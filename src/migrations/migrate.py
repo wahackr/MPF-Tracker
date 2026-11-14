@@ -58,7 +58,7 @@ def _ensure_roles(engine) -> None:
 
 
 def _apply_sql_migrations(engine) -> None:
-    migration_dir = Path(__file__).resolve().parents[1] / "migrations" / "sql"
+    migration_dir = Path(__file__).resolve().parent / "sql"
     migration_files = sorted(migration_dir.glob("*.sql"))
     if not migration_files:
         raise RuntimeError(f"No migration files found in {migration_dir}")

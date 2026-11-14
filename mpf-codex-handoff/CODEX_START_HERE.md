@@ -20,7 +20,7 @@
 | **Valuation** | Its own TypeScript/ExpressJS API (`mpf-valuation`) | **Synchronous** HTTP-triggered snapshots, read-only GET queries; **no queue/worker** |
 
 - **Four independent business modules, four independently deployed Express APIs**, plus **one separate Crawler Python daemon**, and a shared PostgreSQL database/migration container.
-- **No combined API gateway**, no shared internal application libraries (`shared/`, renamed `common/`, `core/`, `packages/shared/`, etc.), and no cross-module source imports. A module owns its own configuration, dependencies, Dockerfile, DB access and logic. External third-party packages are allowed.
+- **No combined API gateway**, no shared internal application libraries (`shared/`, renamed `common/`, `core/`, `packages/shared/`, etc.), and no cross-module source imports. A module owns its own configuration, dependencies, DB access and logic, with its separate Dockerfile under `deploy/docker/`. External third-party packages are allowed.
 - **n8n talks to each module over HTTP only**; n8n does **not** require direct PostgreSQL access. n8n independently schedules Crawler, Purchase and Valuation; Portfolio is user-driven. No automatic inter-service triggering.
 - **Only Crawler is asynchronous** (HTTP 202 + job ID + polling). Crawler worker starts when **its own Docker container starts**, **never** via an API endpoint, FastAPI startup, or HTTP server thread. It safely claims jobs from PostgreSQL with leases/retries/heartbeat/fencing.
 - **Portfolio/Purchase/Valuation execute directly in Express routes**, returning actual completed results and explicit partial/error outcomes. Do not use `mpf.jobs` for these modules.

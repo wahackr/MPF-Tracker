@@ -19,7 +19,7 @@ if str(WORKER_PACKAGE_ROOT) not in sys.path:
 from src.libs.crawlers import manulife  # type: ignore[import-not-found]
 
 TEST_FUND_PREFIX = "MANULIFE:PYTEST_"
-FIXTURES_DIR = Path(__file__).resolve().parents[5] / "mpf-codex-handoff" / "fixtures"
+FIXTURES_DIR = Path(__file__).resolve().parents[6] / "mpf-codex-handoff" / "fixtures"
 
 
 @pytest.fixture

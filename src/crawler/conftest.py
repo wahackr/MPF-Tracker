@@ -15,8 +15,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine, URL
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-ENV_FILE = REPO_ROOT / ".env.example"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = REPO_ROOT / "deploy" / ".env.example"
 COMPOSE_PROJECT = "mpf-itest"
 AUTOMATION_NETWORK = "automation"
 TEST_DB_USERS = {
@@ -40,7 +40,7 @@ class ComposeHarness:
             "--env-file",
             str(ENV_FILE),
             "-f",
-            str(self.repo_root / "compose.yaml"),
+            str(self.repo_root / "deploy" / "compose.yaml"),
             "-f",
             str(self.override_file),
             *args,
@@ -110,7 +110,7 @@ except urllib.error.HTTPError as error:
             "--env-file",
             str(ENV_FILE),
             "-f",
-            str(self.repo_root / "compose.yaml"),
+            str(self.repo_root / "deploy" / "compose.yaml"),
             "-f",
             str(self.override_file),
             "exec",

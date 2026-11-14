@@ -43,7 +43,7 @@ Requirements: Docker Engine with Docker Compose v2 and outbound access to the pr
 1. Create your configuration if `.env` does not already exist:
 
    ```bash
-   cp -n .env.example .env
+   cp -n deploy/.env.example .env
    ```
 
    Edit `.env` and replace `API_KEY`, `POSTGRES_PASSWORD`, and all four service database passwords. The default ports and database host `mpf-db` are configured for Compose.
@@ -59,9 +59,9 @@ Requirements: Docker Engine with Docker Compose v2 and outbound access to the pr
 3. Build and start the stack:
 
    ```bash
-   docker compose up -d --build
-   docker compose ps -a
-   docker compose logs mpf-migrate
+   docker compose --env-file .env -f deploy/compose.yaml up -d --build
+   docker compose --env-file .env -f deploy/compose.yaml ps -a
+   docker compose --env-file .env -f deploy/compose.yaml logs mpf-migrate
    ```
 
    `mpf-migrate` should exit with code `0`. APIs and the worker start after PostgreSQL is healthy and migration completes.
@@ -77,11 +77,37 @@ Requirements: Docker Engine with Docker Compose v2 and outbound access to the pr
    curl --fail http://localhost:8004/health
    ```
 
-PostgreSQL data persists in `./data/postgres`. `docker compose down` stops and removes the stack's containers while retaining that directory. Changing `POSTGRES_PASSWORD` in `.env` does not update the password stored in an existing database; update the PostgreSQL role password to match before restarting migration. Exported shell variables also override `.env`; if test credentials were exported in your terminal, run `unset POSTGRES_PASSWORD` before `docker compose up -d` to use the configured password. Follow crawler execution with `docker compose logs -f mpf-crawler-worker`.
+PostgreSQL data persists in `./data/postgres`. `docker compose --env-file .env -f deploy/compose.yaml down` stops and removes the stack's containers while retaining that directory. Changing `POSTGRES_PASSWORD` in `.env` does not update the password stored in an existing database; update the PostgreSQL role password to match before restarting migration. Exported shell variables also override `.env`; if test credentials were exported in your terminal, run `unset POSTGRES_PASSWORD` before `docker compose --env-file .env -f deploy/compose.yaml up -d` to use the configured password. Follow crawler execution with `docker compose --env-file .env -f deploy/compose.yaml logs -f mpf-crawler-worker`.
+
+### Use an existing shared PostgreSQL server
+
+The default command above starts all containers, including PostgreSQL. To use an existing server, apply [`deploy/compose.shared-db.yaml`](./deploy/compose.shared-db.yaml) after the base file (Docker Compose 2.24.4+).
+
+Create a dedicated database on that server first, then configure your root `.env`:
+
+```dotenv
+SHARED_POSTGRES_HOST=postgres.example.internal
+SHARED_POSTGRES_PORT=5432
+POSTGRES_DB=mpf
+POSTGRES_USER=mpf_migrator
+POSTGRES_PASSWORD=your_migration_password
+```
+
+Set all four service roles and passwords as well. The migration account must be able to create/alter those roles, create the `mpf` schema and `pgcrypto` extension, and apply the schema and grants. PostgreSQL roles are server-wide; choose distinct service role names when sharing a server with other MPF deployments. The migration runner updates passwords for the configured roles.
+
+The hostname must be reachable from the application containers. `localhost` refers to each container itself. For a PostgreSQL container on another Docker network, expose it at a reachable server address. Keep the external `N8N_NETWORK` setup from the quick start.
+
+Run from the repository root:
+
+```bash
+docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.shared-db.yaml up -d --build
+```
+
+This starts five application containers and the one-shot migration container. The bundled `mpf-db` service is excluded; it creates no PostgreSQL container or database volume. Applications start only after migration succeeds. Use the same two `-f` options for `ps`, `logs`, and `down`. When switching an existing local stack to this mode, stop it with its original Compose command first; its `data/postgres/` directory is retained, and this does not transfer its data to the shared server.
 
 ### Configuration
 
-See [`.env.example`](./.env.example) for the complete Compose configuration.
+See [`deploy/.env.example`](./deploy/.env.example) for the complete Compose configuration.
 
 | Settings | Purpose |
 | --- | --- |
@@ -90,13 +116,14 @@ See [`.env.example`](./.env.example) for the complete Compose configuration.
 | `API_BIND_ADDRESS`, `*_API_HOST_PORT` | API host interfaces and ports; defaults to `0.0.0.0` and `8001`–`8004` |
 | `POSTGRES_BIND_ADDRESS`, `POSTGRES_HOST_PORT` | Published database interface and port; defaults to `0.0.0.0:5432` |
 | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Database bootstrap/migration credentials |
-| `POSTGRES_HOST`, `POSTGRES_PORT` | Connection for host-run migration commands; Compose containers always use `mpf-db:5432` |
+| `POSTGRES_HOST`, `POSTGRES_PORT` | Connection for host-run migration commands; bundled Compose uses `mpf-db:5432` |
+| `SHARED_POSTGRES_HOST`, `SHARED_POSTGRES_PORT` | Shared server connection when applying `compose.shared-db.yaml` |
 | `CRAWLER_DB_*`, `PORTFOLIO_DB_*`, `PURCHASE_DB_*`, `VALUATION_DB_*` | Separate database roles and passwords for each module |
 | `WORKER_POLL_INTERVAL_SECONDS` | Idle job polling interval; default `2` |
 | `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` | Worker lease duration and heartbeat interval; defaults to `90` and `15` |
 | `N8N_NETWORK` | Existing external Docker network; default `automation` |
 
-Compose connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
+The default Compose deployment connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
 
 ## First-use workflow
 
@@ -315,29 +342,40 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 
 ```text
 .
-├── compose.yaml
-├── .env.example
-├── crawler/
-│   ├── api/src/                 # Express API, durable job enqueueing, unit tests
-│   ├── conftest.py              # Docker integration harness
-│   └── worker/src/              # Python worker, provider adapters, persistence
-│       └── __tests__/           # Unit, fixture/provider integration, live tests
-├── portfolio/
-│   ├── public/                  # Browser dashboard: HTML, CSS, JavaScript
-│   └── src/                     # Express routes, account rules, unit tests
-├── purchase/src/                # Purchase estimation, confirmation, Jest tests
-├── valuation/src/               # Valuation, snapshots, unit tests
-├── migrations/sql/              # Shared schema and database grants
-├── scripts/migrate.py           # Role setup and SQL migration runner
-├── mpf-codex-handoff/            # Implementation notes and saved provider fixtures
-└── .github/workflows/test.yml   # Python, TypeScript, and Docker integration CI
+├── src/                        # Application code and service packages
+│   ├── crawler/
+│   │   ├── api/                # Express endpoints enqueue download jobs in PostgreSQL
+│   │   ├── worker/             # Python worker polls jobs and downloads provider data
+│   │   └── conftest.py         # Docker integration harness
+│   ├── portfolio/
+│   │   ├── backend/            # Express API, package.json, src/, tests
+│   │   └── frontend/           # Browser dashboard: HTML, CSS, JavaScript
+│   ├── purchase/               # Purchase endpoints; scheduled by n8n
+│   ├── valuation/              # Portfolio valuation endpoints; scheduled by n8n
+│   └── migrations/
+│       ├── migrate.py          # Role setup and SQL migration runner
+│       └── sql/                # Shared schema and database grants
+├── mpf-codex-handoff/           # Implementation notes and saved provider fixtures
+├── data/                       # Local runtime data (ignored by Git)
+├── deploy/                     # Container builds and deployment configuration
+│   ├── compose.yaml            # Full stack with bundled PostgreSQL
+│   ├── compose.shared-db.yaml  # Override for an existing PostgreSQL server
+│   ├── .env.example
+│   └── docker/                 # One Dockerfile per service
+├── README.md
+├── ARCHITECTURE.md
+└── .github/workflows/           # Tests and live provider checks
 ```
+
+Run deployment commands from the repository root with `docker compose --env-file .env -f deploy/compose.yaml`. Local secrets stay in the root `.env`, and PostgreSQL data stays in `data/postgres/`.
+
+Each TypeScript package keeps its implementation and tests in a service-local `src/` directory. The portfolio backend serves the sibling `frontend/` directory both locally and in Docker.
 
 TypeScript services use `index.ts` to start the server, `app.ts` to wire middleware/routes, and service-local `main.ts` and `libs/` for operations and integrations. The worker starts with `app.py` and runs its job loop in `main.py`. No module imports another module's application source.
 
 ### Database write ownership
 
-All service roles can read shared tables. Writes are restricted by [the SQL schema](./migrations/sql/001_init_schema.sql):
+All service roles can read shared tables. Writes are restricted by [the SQL schema](./src/migrations/sql/001_init_schema.sql):
 
 | Owner | Tables in schema `mpf` |
 | --- | --- |
@@ -347,7 +385,7 @@ All service roles can read shared tables. Writes are restricted by [the SQL sche
 | Valuation | `portfolio_snapshots`, `snapshot_fund_values` |
 | Shared invalidation contract | Crawler/portfolio/purchase insert `snapshot_invalidation_requests`; valuation processes them |
 
-The migration runner creates or updates service login roles and executes sorted SQL files from `migrations/sql/`. It reruns the files on invocation; migrations must remain safe to reapply.
+The migration runner creates or updates service login roles and executes sorted SQL files from `src/migrations/sql/`. It reruns the files on invocation; migrations must remain safe to reapply.
 
 ## Schedule requests yourself
 
@@ -395,7 +433,7 @@ Empty purchase and snapshot bodies use today's date in Hong Kong and include all
 
 Use this runbook to move data from a dev/test instance to another host, for example `10.7.7.79` to `10.7.7.78`. Copy `pg_dump` output rather than the `./data/postgres` directory: the cluster directory is sensitive to the PostgreSQL major version and locale, and grants should always come from the target host's own `.env`.
 
-The migration SQL is idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`) and `scripts/migrate.py` creates or alters the four service roles from environment variables on every run, so restoring a dump into an empty database and then running `mpf-migrate` reproduces roles and grants. All primary keys use `gen_random_uuid()` defaults, so there are no sequences to reset after a restore.
+The migration SQL is idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`) and `src/migrations/migrate.py` creates or alters the four service roles from environment variables on every run, so restoring a dump into an empty database and then running `mpf-migrate` reproduces roles and grants. All primary keys use `gen_random_uuid()` defaults, so there are no sequences to reset after a restore.
 
 ### 1. Dump from the source host
 
@@ -417,12 +455,12 @@ Restore into an **empty** database. If the target already contains MPF tables fr
 
 ```bash
 cd ~/mpf-tracker && git pull
-docker compose up -d mpf-db
+docker compose --env-file .env -f deploy/compose.yaml up -d mpf-db
 docker cp ./mpf-dev.dump mpf-tracker-mpf-db-1:/tmp/
 PU=$(grep -m1 '^POSTGRES_USER=' .env | cut -d= -f2-)
 PD=$(grep -m1 '^POSTGRES_DB=' .env | cut -d= -f2-)
 docker exec mpf-tracker-mpf-db-1 pg_restore -U "$PU" -d "$PD" --no-owner --no-privileges /tmp/mpf-dev.dump
-docker compose up -d   # runs mpf-migrate (roles and grants), then the APIs and worker
+docker compose --env-file .env -f deploy/compose.yaml up -d   # runs mpf-migrate (roles and grants), then the APIs and worker
 ```
 
 ### 3. Verify
@@ -444,7 +482,7 @@ Compare the counts against the source host before cutover.
 
 ### After cutover
 
-Stop the source worker (`docker compose stop mpf-crawler-worker`) so two workers do not crawl the providers independently, and repoint the scheduler at the target host. Keep the source stack running until the target has completed one full sync → purchase → snapshot cycle, so it remains available as a rollback.
+Stop the source worker (`docker compose --env-file .env -f deploy/compose.yaml stop mpf-crawler-worker`) so two workers do not crawl the providers independently, and repoint the scheduler at the target host. Keep the source stack running until the target has completed one full sync → purchase → snapshot cycle, so it remains available as a rollback.
 
 ## Development and testing
 
@@ -452,8 +490,8 @@ Local development uses Node.js 22, npm, and Python 3.12, matching the container 
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r crawler/worker/requirements.txt
-for service in crawler/api portfolio purchase valuation; do
+.venv/bin/pip install -r requirements.txt -r src/crawler/worker/requirements.txt
+for service in src/crawler/api src/portfolio/backend src/purchase src/valuation; do
   (cd "$service" && npm ci)
 done
 ```
@@ -462,14 +500,14 @@ Run tests without Docker or live provider requests:
 
 ```bash
 .venv/bin/python -m pytest -q -m 'not integration and not live'
-for service in crawler/api portfolio purchase valuation; do
-  (cd "$service" && npm test)
+for service in src/crawler/api src/portfolio/backend src/purchase src/valuation; do
+  (cd "$service" && npm run test:unit)
 done
 ```
 
 Each TypeScript service also supports `npm run build` and `npm start`. For a host-run API, provide `API_KEY`, `PORT`, and its service database settings using `DB_HOST=127.0.0.1` and the published database port. A host-run portfolio service also needs `VALUATION_API_URL=http://localhost:8004`. The applications do not automatically load `.env`.
 
-Python provider tests use saved responses under `mpf-codex-handoff/fixtures` and mock `httpx.Client.request`. The marked integration tests use the Docker harness in `crawler/conftest.py`, a separate Compose project (`mpf-itest`), and a temporary database volume:
+Python provider tests use saved responses under `mpf-codex-handoff/fixtures` and mock `httpx.Client.request`. The marked integration tests use the Docker harness in `src/crawler/conftest.py`, a separate Compose project (`mpf-itest`), and a temporary database volume:
 
 ```bash
 .venv/bin/python -m pytest -q -m integration
@@ -484,7 +522,7 @@ Live crawler smoke tests call real provider endpoints:
 
 # Or run one provider:
 .venv/bin/python -m pytest -q \
-  crawler/worker/src/__tests__/live/test_hsbc_live.py
+  src/crawler/worker/src/__tests__/live/test_hsbc_live.py
 ```
 
 Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs suites one at a time on pushes and pull requests: Python crawler worker (including integration and live tests), crawler API, portfolio, purchase, then valuation. Each suite must pass before the next starts. CI checks Docker availability first, and each TypeScript service's `npm test` shell script creates, migrates, and removes its own temporary PostgreSQL database.
@@ -498,10 +536,10 @@ integration tests are not included in those TypeScript percentages.
 To run both providers' live endpoint checks on demand, open the [Live Provider Endpoints workflow](./.github/workflows/live-endpoints.yml) in GitHub Actions and choose **Run workflow**. It has no schedule. GitHub shows this manual trigger after the workflow file reaches the default branch.
 
 Crawler API, portfolio, purchase, and valuation use Jest with real PostgreSQL integration tests.
-Run `npm ci` and `npm test` inside any of those service folders (`crawler/api`, `portfolio`, `purchase`, or `valuation`), for example:
+Run `npm ci` and `npm test` inside any of those service folders (`src/crawler/api`, `src/portfolio/backend`, `src/purchase`, or `src/valuation`), for example:
 
 ```bash
-cd portfolio
+cd src/portfolio/backend
 npm ci
 npm test
 ```

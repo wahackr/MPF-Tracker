@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: ${TZ}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - ../data/postgres:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_BIND_ADDRESS:-0.0.0.0}:${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
@@ -24,8 +24,8 @@ services:
 
   mpf-migrate:
     build:
-      context: .
-      dockerfile: migrations/Dockerfile
+      context: ..
+      dockerfile: deploy/docker/migrate.Dockerfile
     restart: "no"
     depends_on:
       mpf-db:
@@ -51,8 +51,8 @@ services:
 
   mpf-crawler-api:
     build:
-      context: .
-      dockerfile: crawler/api/Dockerfile
+      context: ..
+      dockerfile: deploy/docker/crawler-api.Dockerfile
     restart: unless-stopped
     ports:
       - "${API_BIND_ADDRESS:-0.0.0.0}:${CRAWLER_API_HOST_PORT:-8001}:8000"
@@ -82,8 +82,8 @@ services:
 
   mpf-crawler-worker:
     build:
-      context: .
-      dockerfile: crawler/worker/Dockerfile
+      context: ..
+      dockerfile: deploy/docker/crawler-worker.Dockerfile
     restart: unless-stopped
     environment:
       DB_HOST: mpf-db
@@ -111,8 +111,8 @@ services:
 
   mpf-portfolio:
     build:
-      context: .
-      dockerfile: portfolio/Dockerfile
+      context: ..
+      dockerfile: deploy/docker/portfolio.Dockerfile
     restart: unless-stopped
     ports:
       - "${API_BIND_ADDRESS:-0.0.0.0}:${PORTFOLIO_API_HOST_PORT:-8002}:8000"
@@ -144,8 +144,8 @@ services:
 
   mpf-purchase:
     build:
-      context: .
-      dockerfile: purchase/Dockerfile
+      context: ..
+      dockerfile: deploy/docker/purchase.Dockerfile
     restart: unless-stopped
     ports:
       - "${API_BIND_ADDRESS:-0.0.0.0}:${PURCHASE_API_HOST_PORT:-8003}:8000"
@@ -175,8 +175,8 @@ services:
 
   mpf-valuation:
     build:
-      context: .
-      dockerfile: valuation/Dockerfile
+      context: ..
+      dockerfile: deploy/docker/valuation.Dockerfile
     restart: unless-stopped
     ports:
       - "${API_BIND_ADDRESS:-0.0.0.0}:${VALUATION_API_HOST_PORT:-8004}:8000"

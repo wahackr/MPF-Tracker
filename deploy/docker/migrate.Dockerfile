@@ -5,10 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY migrations/requirements.txt /app/requirements.txt
+COPY src/migrations/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY scripts /app/scripts
-COPY migrations /app/migrations
+COPY src/migrations /app/migrations
 
-CMD ["python", "scripts/migrate.py"]
+CMD ["python", "migrations/migrate.py"]

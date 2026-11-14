@@ -42,7 +42,7 @@ CREATE ROLE mpf_purchase LOGIN PASSWORD 'test';
 CREATE ROLE mpf_valuation LOGIN PASSWORD 'test';
 SQL
 
-  for migration in ../migrations/sql/*.sql; do
+  for migration in ../../migrations/sql/*.sql; do
     sed \
       -e 's/{{POSTGRES_DB}}/"mpf"/g' \
       -e 's/{{CRAWLER_DB_USER}}/"mpf_crawler"/g' \

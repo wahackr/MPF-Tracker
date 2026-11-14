@@ -43,7 +43,7 @@ Non-goals: eMPF login or private API automation, placement of actual trades, pub
 ```
 
 - **One module, one business owner.** Do not put Portfolio endpoints in a Crawler or central API server.
-- Every module has its own Dockerfile, runtime dependencies, configuration, database wrapper and API source. The Python worker has its own Dockerfile.
+- Every module has its own runtime dependencies, configuration, database wrapper and API source. Each service, including the Python worker, has a separate Dockerfile under `deploy/docker/`.
 - **No `shared/`, `common/`, `core/`, `packages/shared/`, global DTO or internal helper package.** No imports of other modules' source. Small technical duplication is intentional and acceptable. Shared third-party packages (`pg`, `express`, `zod`, `decimal.js`) are fine.
 - PostgreSQL **schemas/contracts** are the integration boundary; explicit table write ownership and least-privilege DB roles. Central migrations, integration tests and documentation are not runtime shared libraries.
 - n8n triggers each operation independently. No automatic Crawler → Purchase → Valuation calls.
@@ -187,19 +187,22 @@ Schedules are provisional and should use `Asia/Hong_Kong` timezone. No workflow 
 
 ```text
 MPF-Tracker/
-├── crawler/
-│   ├── api/               # TS Express; own Dockerfile, package.json, tsconfig.json, src/
-│   └── worker/            # Python daemon; own Dockerfile, requirements.txt, src/
-├── portfolio/             # TS Express; own Dockerfile, package.json, src/
-├── purchase/              # TS Express; own Dockerfile, package.json, src/
-├── valuation/             # TS Express; own Dockerfile, package.json, src/
-├── migrations/            # Central schema migrations; one-shot migration container
-├── mpf-codex-handoff/     # These authoritative docs + original fixtures
-├── n8n/workflows/         # Importable examples only
-├── crawler/tests/         # Crawler-adjacent integration + architecture checks
-├── crawler/worker/src/__tests__/  # Crawler worker unit + live checks
-├── compose.yaml
-├── .env.example
+├── src/
+│   ├── crawler/
+│   │   ├── api/          # TS Express; own package.json, src/, tests
+│   │   ├── worker/       # Python daemon; own requirements.txt, src/, tests
+│   │   └── conftest.py   # Docker integration harness
+│   ├── portfolio/
+│   │   ├── backend/     # TS Express; own package.json, src/, tests
+│   │   └── frontend/    # Dashboard HTML, CSS, JavaScript; served by the backend
+│   ├── purchase/        # TS Express; own package.json, src/, tests
+│   ├── valuation/       # TS Express; own package.json, src/, tests
+│   └── migrations/      # SQL, migration runner, one-shot container
+├── mpf-codex-handoff/    # These authoritative docs + original fixtures
+├── deploy/
+│   ├── compose.yaml
+│   ├── .env.example
+│   └── docker/          # Separate Dockerfile for each service
 └── README.md
 ```
 

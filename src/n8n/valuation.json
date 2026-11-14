@@ -35,23 +35,83 @@
     },
     {
       "parameters": {
-        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ac55e965-b3b7-5075-9395-7b4c631c79ec",
+              "name": "rebuildUrl",
+              "value": "http://mpf-valuation:8000/v1/valuation/rebuild",
+              "type": "string"
+            },
+            {
+              "id": "a5412a98-ebda-5183-bf6a-e9c738ee0eb0",
+              "name": "snapshotUrl",
+              "value": "http://mpf-valuation:8000/v1/valuation/snapshot",
+              "type": "string"
+            },
+            {
+              "id": "c6a9999e-c428-5131-9a43-1021f714dbe2",
+              "name": "provider",
+              "value": "all",
+              "type": "string"
+            },
+            {
+              "id": "aa9426d1-d282-58a4-a3b8-c61ca79ed481",
+              "name": "rollingDays",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "3594b0d6-360d-5ec4-a86d-06d786d33d17",
+              "name": "maxPolls",
+              "value": 60,
+              "type": "number"
+            },
+            {
+              "id": "eb5dbcb5-33f4-5eef-a477-2e3ffbca4f44",
+              "name": "asOfDate",
+              "value": "={{ $now.setZone('Asia/Hong_Kong').toISODate() }}",
+              "type": "string"
+            },
+            {
+              "id": "449c438a-9426-5222-861a-042c6ab21866",
+              "name": "accountId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "e189ae5b-eb35-574c-9625-14f030c89ba3",
+              "name": "idempotencyKey",
+              "value": "={{ `mpf-n8n-${$workflow.id}-${$execution.id}` }}",
+              "type": "string"
+            },
+            {
+              "id": "f31e4a0f-1336-5a06-b38e-5f1382dbe0bd",
+              "name": "apiKey",
+              "value": "CHANGE_ME",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
       },
       "id": "4ae3277d-4381-5332-aa74-c22fbf831ca3",
       "name": "Configuration",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
         480,
         0
-      ]
+      ],
+      "notes": "Keep the asOfDate expression for today in Hong Kong, or use a fixed YYYY-MM-DD for recovery. Empty accountId selects all accounts. Set apiKey once here; every HTTP Request node reuses it as the X-API-Key header. Keep real keys out of source exports."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/rebuild' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.rebuildUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 300000,
           "response": {
@@ -62,7 +122,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {} }}"
+        "jsonBody": "={{ $('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {} }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
+        }
       },
       "id": "64cc0f0b-9fa3-5711-9ca1-6e1ddb06ae7f",
       "name": "Rebuild stale valuations",
@@ -79,9 +148,8 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/snapshot' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.snapshotUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 300000,
           "response": {
@@ -92,7 +160,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
+        }
       },
       "id": "b202ebd3-8881-557b-80b8-caf134e079f7",
       "name": "Save valuation snapshot",
@@ -121,7 +198,7 @@
     },
     {
       "parameters": {
-        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "content": "## Inactive draft \u2014 issue #26\nSet apiKey in Configuration once; HTTP nodes reuse it as X-API-Key.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
         "height": 240,
         "width": 520
       },

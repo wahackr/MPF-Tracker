@@ -40,6 +40,9 @@ function configFromEnv(env, workflows = loadWorkflows()) {
     httpUrl(value, name);
     if (name === 'crawlJobUrl' && !value.endsWith('/')) throw new Error('crawlJobUrl must end with /');
   }
+  if (env.N8N_ENV === 'prod' && endpointNames.some(name => !values[name])) {
+    throw new Error('Production requires all five full endpoint URLs in N8N_ENDPOINT_URLS');
+  }
   return { ids, values, apiKey: env.API_KEY };
 }
 function render(source, live, config, key) {

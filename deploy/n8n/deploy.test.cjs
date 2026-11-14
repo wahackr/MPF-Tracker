@@ -107,3 +107,17 @@ test('an active standalone draft is rejected before writes', async t => {
   await assert.rejects(deploy({ ...f.options, cli, env: { ...env, N8N_WORKFLOW_IDS: '{"daily-pipeline":"target","download":"download-target"}' } }), /Standalone/);
   assert.ok(f.calls.every(([, command]) => command === 'get'));
 });
+
+test('production rejects missing endpoint overrides instead of falling back to source hosts', () => {
+  assert.throws(() => configFromEnv({ ...env, N8N_ENV: 'prod' }), /Production requires all five/);
+});
+test('production accepts explicit full endpoint configuration', () => {
+  const values = {
+    downloadUrl: 'http://production:8001/v1/crawl/jobs/sync',
+    crawlJobUrl: 'http://production:8001/v1/crawl/jobs/',
+    purchaseUrl: 'http://production:8003/v1/purchases/process',
+    rebuildUrl: 'http://production:8004/v1/valuation/rebuild',
+    snapshotUrl: 'http://production:8004/v1/valuation/snapshot',
+  };
+  assert.deepEqual(configFromEnv({ ...env, N8N_ENV: 'prod', N8N_ENDPOINT_URLS: JSON.stringify(values) }).values, values);
+});

@@ -482,7 +482,7 @@ Compare the counts against the source host before cutover.
 - New `POSTGRES_PASSWORD` and the four `*_DB_PASSWORD` values are fine; `mpf-migrate` creates the roles and re-grants permissions.
 - Keep `POSTGRES_DB` matching the database name used at restore time.
 - Set a target `API_KEY` distinct from the development value.
-- The external network named by `N8N_NETWORK` must exist on the target; Compose requires it, and that is where a container-based scheduler attaches.
+- The external network named by `N8N_NETWORK` must exist on the target for manual Compose deployment; the automated pipeline creates it if missing. A container-based scheduler attaches to that network.
 
 ### After cutover
 

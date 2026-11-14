@@ -16,6 +16,11 @@ function run(stage, changes = {}) {
   writeFileSync(join(directory, 'docker'), `#!/usr/bin/env bash
 if [[ "\${DOCKER_HOST:-}" != unix:///var/run/docker.sock || -n "\${DOCKER_CONTEXT:-}" ]]; then exit 90; fi
 printf '%s\\n' "$* profiles=$COMPOSE_PROFILES" >> "$TEST_DOCKER_LOG"
+if [[ "$1 $2" == "network inspect" && "\${TEST_NETWORK_MISSING:-}" == 1 && ! -f "$TEST_DOCKER_LOG.network" ]]; then exit 1; fi
+if [[ "$1 $2" == "network create" ]]; then
+  if [[ "\${TEST_NETWORK_CREATE_FAIL:-}" == 1 ]]; then exit 1; fi
+  touch "$TEST_DOCKER_LOG.network"
+fi
 if [[ "\${TEST_FAIL_UP:-}" == 1 && "$*" == *" up "* ]]; then exit 1; fi
 `, { mode: 0o755 });
   try {
@@ -38,6 +43,26 @@ test('validates shared mode using local Docker despite inherited remote settings
   assert.match(result.calls, /compose --env-file \/dev\/null -f deploy\/compose.yaml -f deploy\/compose.shared-db.yaml config --quiet profiles=\n/);
   assert.match(result.calls, /network inspect automation/);
   assert.doesNotMatch(result.calls, /--context|context inspect/);
+});
+test('reuses an existing network without creating it', () => {
+  const result = run('validate');
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.calls, /network create/);
+});
+test('creates a missing configured network during validation', () => {
+  const result = run('validate', { TEST_NETWORK_MISSING: '1', N8N_NETWORK: 'mpf-automation' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.calls, /network create mpf-automation/);
+});
+test('deployment also creates a missing network before starting containers', () => {
+  const result = run('deploy', { TEST_NETWORK_MISSING: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.calls.indexOf('network create automation') < result.calls.indexOf(' up -d'));
+});
+test('fails before deployment when the network cannot be created', () => {
+  const result = run('deploy', { TEST_NETWORK_MISSING: '1', TEST_NETWORK_CREATE_FAIL: '1' });
+  assert.equal(result.status, 1);
+  assert.doesNotMatch(result.calls, / up -d/);
 });
 test('builds bundled mode without the shared override', () => {
   const result = run('build', { DB_MODE: 'bundled', POSTGRES_DATA_DIR: '/srv/mpf-test/postgres' });

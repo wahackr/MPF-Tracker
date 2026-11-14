@@ -86,6 +86,8 @@ case "$stage" in
     ensure_network
     # Compose waits for database readiness, successful migration, then app health checks.
     if ! "${compose[@]}" up -d --no-build --wait --wait-timeout 180; then
+      # Detached up hides service output; dump logs so failures like migration errors show the cause.
+      "${compose[@]}" logs --no-color --tail 200 || true
       "${compose[@]}" ps -a
       echo 'Deployment failed or application readiness timed out.' >&2
       exit 1

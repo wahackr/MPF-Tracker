@@ -29,10 +29,10 @@ On the same settings page, add these environment **variables** for the default s
 
 | Variable | Value / default |
 | --- | --- |
-| `POSTGRES_USER` | Required: existing administrator with role/schema management privileges |
+| `POSTGRES_USER` | Required: existing administrator with access to `postgres`, role/schema management privileges, and `CREATEDB` if the application database is missing |
 | `SHARED_POSTGRES_HOST` | Required: server hostname reachable from app containers |
 | `SHARED_POSTGRES_PORT` | `5432` |
-| `POSTGRES_DB` | `mpf_dev`; create this database before deployment |
+| `POSTGRES_DB` | `mpf_dev`; migration creates this database if missing |
 | `DB_MODE` | `shared` |
 
 Service users are created by migration, with default names `mpf_dev_crawler`, `mpf_dev_portfolio`, `mpf_dev_purchase`, and `mpf_dev_valuation`. Use `CRAWLER_DB_USER`, `PORTFOLIO_DB_USER`, `PURCHASE_DB_USER`, and `VALUATION_DB_USER` to override them. Keep role names distinct from other deployments because PostgreSQL roles and their passwords are server-wide.

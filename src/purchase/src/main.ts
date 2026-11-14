@@ -56,8 +56,9 @@ type Allocation = {
 export async function processPurchases(payload: ProcessPayload): Promise<Record<string, unknown>> {
   const asOfDate = payload.as_of_date ?? hkToday();
   const period = monthStart(asOfDate);
+  console.info("[purchase] Processing started", { as_of_date: asOfDate, period, account_id: payload.account_id ?? "all" });
 
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     // Only create this month's events for plans whose contribution date has arrived.
     const plans = (await client.query<Plan>(
       `SELECT plan_id, account_id, contribution_stream, amount, expected_day
@@ -163,6 +164,15 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
 
       // Reject the entire event if its allocation is missing or does not total 100%.
       if (funds.length === 0 || !weightsTotalOneHundred(funds)) {
+        console.warn("[purchase] Event requires review", {
+          event_id: event.event_id,
+          plan_id: event.plan_id,
+          account_id: plan.account_id,
+          contribution_stream: plan.contribution_stream,
+          allocation_as_of: period,
+          reason: funds.length === 0 ? "missing_allocation" : "invalid_allocation_weights",
+          allocations: funds.map(({ fund_id, weight }) => ({ fund_id, weight }))
+        });
         statuses.push({ event_id: event.event_id, status: "FAILED_REVIEW" });
         summary.failed_events += 1;
         continue;
@@ -170,6 +180,14 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
 
       // Wait for every fund to have a usable price before preparing any purchases.
       if (funds.some((fund) => !fund.price_date || fund.price === null || !new Decimal(fund.price).gt(0))) {
+        console.warn("[purchase] Event waiting for prices", {
+          event_id: event.event_id,
+          plan_id: event.plan_id,
+          expected_date: event.expected_date,
+          as_of_date: asOfDate,
+          funds: funds.filter((fund) => !fund.price_date || fund.price === null || !new Decimal(fund.price).gt(0))
+            .map(({ fund_id, price_date, price }) => ({ fund_id, price_date, price }))
+        });
         statuses.push({ event_id: event.event_id, status: "WAITING_FOR_PRICE" });
         summary.waiting_events += 1;
         summary.waiting_details.push({ event_id: event.event_id, reason: "missing_price" });
@@ -251,6 +269,8 @@ export async function processPurchases(payload: ProcessPayload): Promise<Record<
 
     return summary;
   });
+  console.info("[purchase] Processing committed", result);
+  return result;
 }
 
 export async function confirmPurchaseEvent(

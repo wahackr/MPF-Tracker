@@ -82,13 +82,14 @@ app.post("/v1/purchases/events/:eventId/confirm", async (req, res, next) => {
   }
 });
 
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+app.use((error: unknown, req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof ZodError) {
     res.status(400).json({ detail: "Invalid request payload", issues: error.issues });
     return;
   }
   const status = (error as Error & { status?: number }).status ?? 500;
   const message = error instanceof Error ? error.message : "Unexpected error";
+  console.error("[purchase] Request failed", { method: req.method, path: req.path, status, message });
   res.status(status).json({ detail: message });
 });
 

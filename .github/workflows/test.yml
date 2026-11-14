@@ -21,6 +21,9 @@ jobs:
             src/purchase/package-lock.json
             src/valuation/package-lock.json
 
+      - name: Test deployment tooling
+        run: node --test deploy/tools/*.test.cjs
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"

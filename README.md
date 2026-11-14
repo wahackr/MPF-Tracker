@@ -105,6 +105,10 @@ docker compose --env-file .env -f deploy/compose.yaml -f deploy/compose.shared-d
 
 This starts five application containers and the one-shot migration container. The bundled `mpf-db` service is excluded; it creates no PostgreSQL container or database volume. Applications start only after migration succeeds. Use the same two `-f` options for `ps`, `logs`, and `down`. When switching an existing local stack to this mode, stop it with its original Compose command first; its `data/postgres/` directory is retained, and this does not transfer its data to the shared server.
 
+### Automatic deployment
+
+The [dev deployment workflow](./.github/workflows/deployment-dev-pipeline.yaml) deploys changes pushed to `development` through a self-hosted runner. See [deployment setup](./deploy/README.md) for runner requirements, GitHub variables and secrets, and database mode selection.
+
 ### Configuration
 
 See [`deploy/.env.example`](./deploy/.env.example) for the complete Compose configuration.

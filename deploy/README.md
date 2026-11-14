@@ -6,13 +6,11 @@ Local Compose commands and shared PostgreSQL setup are described in the root [RE
 
 [deployment-dev-pipeline.yaml](../.github/workflows/deployment-dev-pipeline.yaml) follows the self-hosted Compose pipeline used by Quickbook Invoice Status. Changes to `src/`, `deploy/`, or the workflow on `development` trigger deployment. You can also run the workflow manually on `development`.
 
-The workflow uses the repository’s self-hosted runner with `runs-on: self-hosted`; no custom runner label is required. The defaults are Docker context `dev` and GitHub environment `dev`. Deployments run sequentially and skip commits superseded by newer application or deployment changes. A second check after the image build avoids deploying an older commit that was superseded during the build. This pipeline deploys directly after a matching push; the separate Test workflow runs independently.
+The workflow uses the repository’s self-hosted runner with `runs-on: self-hosted`; no custom runner label is required. Deployments use Docker on the runner machine and GitHub environment `dev`. Deployments run sequentially and skip commits superseded by newer application or deployment changes. A second check after the image build avoids deploying an older commit that was superseded during the build. This pipeline deploys directly after a matching push; the separate Test workflow runs independently.
 
 ### Runner setup
 
-Register a Linux self-hosted runner directly under this personal repository’s **Settings → Actions → Runners**. The runner needs Bash, Docker with Compose 2.24.4+, and access to the `dev` Docker context. The context must point to the intended deployment host. Create the external `automation` network on that Docker host, or configure `N8N_NETWORK` to use an existing network. The runner also needs outbound access to GitHub, Docker Hub, npm, and PyPI for checkout and builds.
-
-Set the `dev` environment variable `DOCKER_CONTEXT` to choose another Docker context.
+Register a Linux self-hosted runner directly under this personal repository’s **Settings → Actions → Runners**. The runner needs Bash, Docker with Compose 2.24.4+, and permission to access the local Docker socket at `/var/run/docker.sock`. No Docker context setup is needed. Create the external `automation` network on that Docker host, or configure `N8N_NETWORK` to use an existing network. The runner also needs outbound access to GitHub, Docker Hub, npm, and PyPI for checkout and builds.
 
 ### GitHub configuration
 

@@ -14,13 +14,14 @@ function run(stage, changes = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'mpf-deploy-test-'));
   const log = join(directory, 'calls');
   writeFileSync(join(directory, 'docker'), `#!/usr/bin/env bash
+if [[ "\${DOCKER_HOST:-}" != unix:///var/run/docker.sock || -n "\${DOCKER_CONTEXT:-}" ]]; then exit 90; fi
 printf '%s\\n' "$* profiles=$COMPOSE_PROFILES" >> "$TEST_DOCKER_LOG"
 if [[ "\${TEST_FAIL_UP:-}" == 1 && "$*" == *" up "* ]]; then exit 1; fi
 `, { mode: 0o755 });
   try {
     const result = spawnSync('bash', ['deploy/tools/deploy.sh', stage], {
       cwd: root, encoding: 'utf8', env: {
-        ...process.env, ...defaults, DOCKER_CONTEXT: 'dev', COMPOSE_PROJECT_NAME: 'mpf-test',
+        ...process.env, ...defaults, DOCKER_CONTEXT: 'missing-context', DOCKER_HOST: 'tcp://remote.example:2376', COMPOSE_PROJECT_NAME: 'mpf-test',
         MPF_INTERNAL_NETWORK: 'mpf-test-internal', DB_MODE: 'shared',
         SHARED_POSTGRES_HOST: 'shared.example', TEST_DOCKER_LOG: log,
         COMPOSE_PROFILES: 'bundled-db', ...changes, PATH: `${directory}:${process.env.PATH}`,
@@ -31,11 +32,12 @@ if [[ "\${TEST_FAIL_UP:-}" == 1 && "$*" == *" up "* ]]; then exit 1; fi
     return { ...result, calls };
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }
-test('validates shared mode against the chosen context without local env files or inherited profiles', () => {
+test('validates shared mode using local Docker despite inherited remote settings', () => {
   const result = run('validate');
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.calls, /--context dev compose --env-file \/dev\/null -f deploy\/compose.yaml -f deploy\/compose.shared-db.yaml config --quiet profiles=\n/);
-  assert.match(result.calls, /--context dev network inspect automation/);
+  assert.match(result.calls, /compose --env-file \/dev\/null -f deploy\/compose.yaml -f deploy\/compose.shared-db.yaml config --quiet profiles=\n/);
+  assert.match(result.calls, /network inspect automation/);
+  assert.doesNotMatch(result.calls, /--context|context inspect/);
 });
 test('builds bundled mode without the shared override', () => {
   const result = run('build', { DB_MODE: 'bundled', POSTGRES_DATA_DIR: '/srv/mpf-test/postgres' });

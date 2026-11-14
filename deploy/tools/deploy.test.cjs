@@ -76,10 +76,12 @@ test('deployment waits for health and migration without rebuilding', () => {
   assert.match(result.calls, /up -d --no-build --wait --wait-timeout 180/);
   assert.match(result.calls, /ps -a/);
 });
-test('failed readiness fails the deployment', () => {
+test('failed readiness fails the deployment and dumps service logs', () => {
   const result = run('deploy', { TEST_FAIL_UP: '1' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Deployment failed/);
+  assert.match(result.calls, /compose --env-file \/dev\/null -f deploy\/compose\.yaml -f deploy\/compose\.shared-db\.yaml logs --no-color --tail 200/);
+  assert.ok(result.calls.indexOf(' logs --no-color') < result.calls.indexOf('ps -a'));
 });
 for (const [name, changes] of [
   ['environment placeholder', { N8N_NETWORK: 'CHANGE_ME' }],

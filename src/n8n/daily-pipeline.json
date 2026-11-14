@@ -35,23 +35,101 @@
     },
     {
       "parameters": {
-        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "149b97b4-8210-55ab-b5cc-5fa4706609cb",
+              "name": "downloadUrl",
+              "value": "http://mpf-crawler-api:8000/v1/crawl/jobs/sync",
+              "type": "string"
+            },
+            {
+              "id": "2302faa7-c737-5f4f-9058-06b9dbfe4f4a",
+              "name": "crawlJobUrl",
+              "value": "http://mpf-crawler-api:8000/v1/crawl/jobs/",
+              "type": "string"
+            },
+            {
+              "id": "f33112de-7e26-53ea-aa70-0de6fd2e90ec",
+              "name": "purchaseUrl",
+              "value": "http://mpf-purchase:8000/v1/purchases/process",
+              "type": "string"
+            },
+            {
+              "id": "76a306ee-ad97-5d6d-bdad-acee4676cc09",
+              "name": "rebuildUrl",
+              "value": "http://mpf-valuation:8000/v1/valuation/rebuild",
+              "type": "string"
+            },
+            {
+              "id": "49cf3bc7-284a-56cc-87c2-44406e89c6cd",
+              "name": "snapshotUrl",
+              "value": "http://mpf-valuation:8000/v1/valuation/snapshot",
+              "type": "string"
+            },
+            {
+              "id": "54af555e-eb4d-5183-9cd7-e0ab2c87e47d",
+              "name": "provider",
+              "value": "all",
+              "type": "string"
+            },
+            {
+              "id": "18be9623-47c3-52a3-9d41-0737bafd66b3",
+              "name": "rollingDays",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "76b2adce-60fe-5854-9592-66ec94a6dc46",
+              "name": "maxPolls",
+              "value": 60,
+              "type": "number"
+            },
+            {
+              "id": "d1a7e293-9930-52fd-8b13-1daab99515d6",
+              "name": "asOfDate",
+              "value": "={{ $now.setZone('Asia/Hong_Kong').toISODate() }}",
+              "type": "string"
+            },
+            {
+              "id": "c65e458d-13c8-57a3-91ba-9ba535ba350e",
+              "name": "accountId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "7c0ce3e2-1dd4-54af-841c-46980b43f771",
+              "name": "idempotencyKey",
+              "value": "={{ `mpf-n8n-${$workflow.id}-${$execution.id}` }}",
+              "type": "string"
+            },
+            {
+              "id": "482c94d1-59a3-5b69-8cd9-526f3d5139bb",
+              "name": "apiKey",
+              "value": "CHANGE_ME",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
       },
       "id": "d04256f5-8329-55d6-a04d-2a485217b429",
       "name": "Configuration",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
         480,
         0
-      ]
+      ],
+      "notes": "Keep the asOfDate expression for today in Hong Kong, or use a fixed YYYY-MM-DD for recovery. Empty accountId selects all accounts. Set apiKey once here; every HTTP Request node reuses it as the X-API-Key header. Keep real keys out of source exports."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/sync' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.downloadUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 60000,
           "response": {
@@ -69,6 +147,10 @@
             {
               "name": "Idempotency-Key",
               "value": "={{ $('Configuration').first().json.idempotencyKey }}"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
             }
           ]
         }
@@ -88,9 +170,8 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/' + $('Queue download').first().json.job_id }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.crawlJobUrl + $('Queue download').first().json.job_id }}",
+        "authentication": "none",
         "options": {
           "timeout": 60000,
           "response": {
@@ -98,6 +179,15 @@
               "responseFormat": "json"
             }
           }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
         }
       },
       "id": "17803ae7-faa0-58d9-be8a-2cc070b7e6d5",
@@ -178,9 +268,8 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.purchaseUrl + '/v1/purchases/process' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.purchaseUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 300000,
           "response": {
@@ -191,7 +280,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
+        }
       },
       "id": "d515c558-99d2-5102-80c9-85b78a0b103b",
       "name": "Process purchases",
@@ -221,9 +319,8 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/rebuild' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.rebuildUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 300000,
           "response": {
@@ -234,7 +331,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {} }}"
+        "jsonBody": "={{ $('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {} }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
+        }
       },
       "id": "7a8793bd-ad0e-5280-bdbb-4415c1e3c1d1",
       "name": "Rebuild stale valuations",
@@ -251,9 +357,8 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/snapshot' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.snapshotUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 300000,
           "response": {
@@ -264,7 +369,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
+        }
       },
       "id": "37a1f2f3-ee02-50a3-b9a5-b13d6d76938c",
       "name": "Save valuation snapshot",
@@ -293,7 +407,7 @@
     },
     {
       "parameters": {
-        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "content": "## Inactive draft \u2014 issue #26\nSet apiKey in Configuration once; HTTP nodes reuse it as X-API-Key.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
         "height": 240,
         "width": 520
       },

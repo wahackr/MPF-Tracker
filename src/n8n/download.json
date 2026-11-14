@@ -35,23 +35,83 @@
     },
     {
       "parameters": {
-        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "cd922177-fa3a-54b8-8887-9d681abbe77a",
+              "name": "downloadUrl",
+              "value": "http://mpf-crawler-api:8000/v1/crawl/jobs/sync",
+              "type": "string"
+            },
+            {
+              "id": "cd68d0a5-c7dc-5c4d-b5fe-c8a9a9f5961f",
+              "name": "crawlJobUrl",
+              "value": "http://mpf-crawler-api:8000/v1/crawl/jobs/",
+              "type": "string"
+            },
+            {
+              "id": "21bdad5c-63d9-5f00-8790-37d6f46fad6a",
+              "name": "provider",
+              "value": "all",
+              "type": "string"
+            },
+            {
+              "id": "07393b1c-44db-562d-9702-08ee6d233f2c",
+              "name": "rollingDays",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "048f7876-56e6-5d97-a6f5-f9bedd6999d7",
+              "name": "maxPolls",
+              "value": 60,
+              "type": "number"
+            },
+            {
+              "id": "1f8610ea-7930-5777-af30-1d084f8fef7a",
+              "name": "asOfDate",
+              "value": "={{ $now.setZone('Asia/Hong_Kong').toISODate() }}",
+              "type": "string"
+            },
+            {
+              "id": "f0d06fd1-1198-51a8-b4ea-fb026e4d6ec0",
+              "name": "accountId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "77fe51c4-a816-5c63-a86e-1d65c4b5023f",
+              "name": "idempotencyKey",
+              "value": "={{ `mpf-n8n-${$workflow.id}-${$execution.id}` }}",
+              "type": "string"
+            },
+            {
+              "id": "44e6e592-800f-5c50-a728-6904b8568916",
+              "name": "apiKey",
+              "value": "CHANGE_ME",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
       },
       "id": "9ba40715-51a5-56ce-aba2-bb08084250be",
       "name": "Configuration",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
         480,
         0
-      ]
+      ],
+      "notes": "Keep the asOfDate expression for today in Hong Kong, or use a fixed YYYY-MM-DD for recovery. Empty accountId selects all accounts. Set apiKey once here; every HTTP Request node reuses it as the X-API-Key header. Keep real keys out of source exports."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/sync' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.downloadUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 60000,
           "response": {
@@ -69,6 +129,10 @@
             {
               "name": "Idempotency-Key",
               "value": "={{ $('Configuration').first().json.idempotencyKey }}"
+            },
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
             }
           ]
         }
@@ -88,9 +152,8 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/' + $('Queue download').first().json.job_id }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.crawlJobUrl + $('Queue download').first().json.job_id }}",
+        "authentication": "none",
         "options": {
           "timeout": 60000,
           "response": {
@@ -98,6 +161,15 @@
               "responseFormat": "json"
             }
           }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
         }
       },
       "id": "fe893bca-8c9c-5fb6-813b-9a478b8ab048",
@@ -177,7 +249,7 @@
     },
     {
       "parameters": {
-        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "content": "## Inactive draft \u2014 issue #26\nSet apiKey in Configuration once; HTTP nodes reuse it as X-API-Key.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
         "height": 240,
         "width": 520
       },

@@ -35,23 +35,77 @@
     },
     {
       "parameters": {
-        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f172877b-c342-56aa-a067-9462fca7ce9f",
+              "name": "purchaseUrl",
+              "value": "http://mpf-purchase:8000/v1/purchases/process",
+              "type": "string"
+            },
+            {
+              "id": "c8571cd3-207f-5121-af9e-5abcdfbe8109",
+              "name": "provider",
+              "value": "all",
+              "type": "string"
+            },
+            {
+              "id": "372548aa-66b4-5508-8a3f-358baa96a9a7",
+              "name": "rollingDays",
+              "value": 7,
+              "type": "number"
+            },
+            {
+              "id": "ab6b98b4-8063-57de-a9ec-104f186e14b0",
+              "name": "maxPolls",
+              "value": 60,
+              "type": "number"
+            },
+            {
+              "id": "cfae385c-eff3-5215-9c7d-c3c6c09e794f",
+              "name": "asOfDate",
+              "value": "={{ $now.setZone('Asia/Hong_Kong').toISODate() }}",
+              "type": "string"
+            },
+            {
+              "id": "daa4e0f3-fe05-5a20-b098-f1d266e0b031",
+              "name": "accountId",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "69c98886-e5d4-5d54-bc27-13ac220d76bd",
+              "name": "idempotencyKey",
+              "value": "={{ `mpf-n8n-${$workflow.id}-${$execution.id}` }}",
+              "type": "string"
+            },
+            {
+              "id": "fcd7d3ed-b98e-598e-b5f3-62090017629a",
+              "name": "apiKey",
+              "value": "CHANGE_ME",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
       },
       "id": "7eb3a178-bc43-5f44-9098-30afd7feef78",
       "name": "Configuration",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
       "position": [
         480,
         0
-      ]
+      ],
+      "notes": "Keep the asOfDate expression for today in Hong Kong, or use a fixed YYYY-MM-DD for recovery. Empty accountId selects all accounts. Set apiKey once here; every HTTP Request node reuses it as the X-API-Key header. Keep real keys out of source exports."
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $('Configuration').first().json.purchaseUrl + '/v1/purchases/process' }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{ $('Configuration').first().json.purchaseUrl }}",
+        "authentication": "none",
         "options": {
           "timeout": 300000,
           "response": {
@@ -62,7 +116,16 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $('Configuration').first().json.apiKey }}"
+            }
+          ]
+        }
       },
       "id": "53fd80d6-9d3b-5557-8ea9-4536b0b0a8c9",
       "name": "Process purchases",
@@ -91,7 +154,7 @@
     },
     {
       "parameters": {
-        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "content": "## Inactive draft \u2014 issue #26\nSet apiKey in Configuration once; HTTP nodes reuse it as X-API-Key.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
         "height": 240,
         "width": 520
       },

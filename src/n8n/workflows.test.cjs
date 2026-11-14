@@ -39,7 +39,13 @@ function simulate(file = 'daily-pipeline', options = {}) {
       switch (node.type.replace('n8n-nodes-base.', '')) {
         case 'code':
           input = vm.runInNewContext(`(function () { ${node.parameters.jsCode}\n})()`, { ...context, $runIndex: runIndex })[0].json;
-          if (node.name === 'Configuration') Object.assign(input, options.config);
+          break;
+        case 'set':
+          input = Object.fromEntries(node.parameters.assignments.assignments.map(({ name, value, type }) => {
+            const resolved = expr(options.config && Object.hasOwn(options.config, name) ? options.config[name] : value);
+            assert.equal(typeof resolved, type, `Configuration type for ${name}`);
+            return [name, resolved];
+          }));
           break;
         case 'httpRequest': {
           const url = expr(node.parameters.url);
@@ -79,10 +85,15 @@ function simulate(file = 'daily-pipeline', options = {}) {
 }
 
 for (const file of ['daily-pipeline', 'download', 'purchase', 'valuation']) {
-  test(`${file}: inactive import structure, credentials and retry limits`, () => {
+  test(`${file}: inactive import structure, API key header and retry limits`, () => {
     const workflow = load(file);
     assert.equal(workflow.active, false);
     assert.equal(workflow.settings.timezone, 'Asia/Hong_Kong');
+    const configuration = workflow.nodes.find((node) => node.name === 'Configuration');
+    assert.equal(configuration.type, 'n8n-nodes-base.set');
+    assert.equal(configuration.parameters.mode, 'manual');
+    assert.equal(configuration.parameters.includeOtherFields, false);
+    assert.equal(configuration.parameters.assignments.assignments.find((field) => field.name === 'apiKey').value, 'CHANGE_ME');
     const names = new Set(workflow.nodes.map((node) => node.name));
     assert.equal(names.size, workflow.nodes.length);
     assert.equal(new Set(workflow.nodes.map((node) => node.id)).size, workflow.nodes.length);
@@ -92,8 +103,8 @@ for (const file of ['daily-pipeline', 'download', 'purchase', 'valuation']) {
     }
     assert.equal(workflow.nodes.find((node) => node.type.endsWith('.scheduleTrigger')).parameters.rule.interval[0].expression, '0 0 6 * * *');
     for (const node of workflow.nodes.filter((node) => node.type.endsWith('.httpRequest'))) {
-      assert.equal(node.parameters.authentication, 'genericCredentialType');
-      assert.equal(node.parameters.genericAuthType, 'httpHeaderAuth');
+      assert.equal(node.parameters.authentication, 'none');
+      assert.equal(node.parameters.genericAuthType, undefined);
       assert.equal(node.credentials, undefined);
       assert.equal(node.continueOnFail, undefined);
       assert.equal(node.retryOnFail, true);
@@ -101,8 +112,12 @@ for (const file of ['daily-pipeline', 'download', 'purchase', 'valuation']) {
       assert.equal(node.waitBetweenTries, 5000);
       assert.ok(node.parameters.options.timeout <= 300000);
     }
-    const result = simulate(file);
+    const result = simulate(file, { config: { apiKey: 'fixture-api-key' } });
     assert.equal(result.error, undefined);
+    for (const request of result.requests) {
+      assert.equal(request.headers['X-API-Key'], 'fixture-api-key');
+      assert.equal(request.headers.Authorization, undefined);
+    }
   });
 }
 
@@ -120,6 +135,28 @@ test('daily: crawl completion precedes purchases, rebuild and snapshot', () => {
   // The header expression always refers to the one captured configuration value.
   const queueNode = load().nodes.find((node) => node.name === 'Queue download');
   assert.equal(queueNode.parameters.headerParameters.parameters[0].value, "={{ $('Configuration').first().json.idempotencyKey }}");
+});
+
+test('configured full endpoint URLs control every HTTP request', () => {
+  const config = {
+    downloadUrl: 'https://crawler.example/custom/sync',
+    crawlJobUrl: 'https://crawler.example/custom/jobs/',
+    purchaseUrl: 'https://purchase.example/custom/process',
+    rebuildUrl: 'https://valuation.example/custom/rebuild',
+    snapshotUrl: 'https://valuation.example/custom/snapshot',
+  };
+  const expected = {
+    'Queue download': config.downloadUrl,
+    'Read crawl job': `${config.crawlJobUrl}job-fixture`,
+    'Process purchases': config.purchaseUrl,
+    'Rebuild stale valuations': config.rebuildUrl,
+    'Save valuation snapshot': config.snapshotUrl,
+  };
+  for (const file of ['daily-pipeline', 'download', 'purchase', 'valuation']) {
+    const result = simulate(file, { config });
+    assert.equal(result.error, undefined);
+    for (const request of result.requests) assert.equal(request.url, expected[request.name]);
+  }
 });
 
 for (const status of ['partial', 'failed', 'unknown']) {

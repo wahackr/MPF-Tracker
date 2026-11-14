@@ -1,0 +1,96 @@
+name: Deploy n8n workflow definitions
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+      branch:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.ref == format('refs/heads/{0}', inputs.branch)
+    environment: ${{ inputs.environment }}
+    runs-on: self-hosted
+    timeout-minutes: 15
+    concurrency:
+      group: mpf-tracker-n8n-${{ inputs.environment }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+    env:
+      N8N_URL: ${{ vars.N8N_API_ENDPOINT }}
+      N8N_API_KEY: ${{ secrets.N8N_API_KEY }}
+      N8N_WORKFLOW_IDS: ${{ vars.N8N_WORKFLOW_IDS }}
+      N8N_ENDPOINT_URLS: ${{ vars.N8N_ENDPOINT_URLS }}
+      API_KEY: ${{ secrets.API_KEY }}
+      DEPLOY_BRANCH: ${{ inputs.branch }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Skip superseded commits
+        id: current
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const isCurrent = require('./deploy/tools/deployment-current.cjs');
+            core.setOutput('deploy', String(await isCurrent({
+              github, context, branch: process.env.DEPLOY_BRANCH, kind: 'n8n',
+            })));
+
+      - uses: actions/setup-node@v7
+        if: steps.current.outputs.deploy == 'true'
+        with:
+          node-version: '24'
+
+      - name: Validate workflows and deployment configuration
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          node --test src/n8n/workflows.test.cjs deploy/n8n/deploy.test.cjs deploy/tools/deployment-current.test.cjs
+          node -e 'require("./deploy/n8n/deploy.cjs").configFromEnv(process.env)'
+
+      - name: Install pinned n8n CLI
+        if: steps.current.outputs.deploy == 'true'
+        run: npm install --global @n8n/cli@0.15.0
+
+      - name: Preview deployment
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          N8N_DEPLOY_OUT: ${{ runner.temp }}/mpf-n8n-${{ inputs.environment }}-${{ github.run_id }}-${{ github.run_attempt }}/plan
+        run: node deploy/n8n/deploy.cjs --dry-run
+
+      - name: Recheck branch before deployment
+        id: ready
+        if: steps.current.outputs.deploy == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const isCurrent = require('./deploy/tools/deployment-current.cjs');
+            core.setOutput('deploy', String(await isCurrent({
+              github, context, branch: process.env.DEPLOY_BRANCH, kind: 'n8n',
+            })));
+
+      - name: Deploy and verify
+        if: steps.ready.outputs.deploy == 'true'
+        env:
+          N8N_DEPLOY_OUT: ${{ runner.temp }}/mpf-n8n-${{ inputs.environment }}-${{ github.run_id }}-${{ github.run_attempt }}/apply
+        run: node deploy/n8n/deploy.cjs
+
+      - name: Save redacted deployment audit and recovery definitions
+        if: always() && steps.current.outputs.deploy == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mpf-n8n-${{ inputs.environment }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mpf-n8n-${{ inputs.environment }}-${{ github.run_id }}-${{ github.run_attempt }}/
+          retention-days: 7
+          if-no-files-found: ignore

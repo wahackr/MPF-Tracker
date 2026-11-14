@@ -62,17 +62,28 @@ for key in CRAWLER_API_HOST_PORT PORTFOLIO_API_HOST_PORT PURCHASE_API_HOST_PORT 
   fi
 done
 
+ensure_network() {
+  if ! docker network inspect "$N8N_NETWORK" >/dev/null 2>&1; then
+    echo "Creating Docker network: $N8N_NETWORK"
+    # Another deployment may create this shared network between inspect and create.
+    if ! docker network create "$N8N_NETWORK" >/dev/null; then
+      docker network inspect "$N8N_NETWORK" >/dev/null
+    fi
+  fi
+}
+
 case "$stage" in
   validate)
     docker info >/dev/null
     docker compose version
-    docker network inspect "$N8N_NETWORK" >/dev/null
     "${compose[@]}" config --quiet
+    ensure_network
     ;;
   build)
     "${compose[@]}" build --pull
     ;;
   deploy)
+    ensure_network
     # Compose waits for database readiness, successful migration, then app health checks.
     if ! "${compose[@]}" up -d --no-build --wait --wait-timeout 180; then
       "${compose[@]}" ps -a

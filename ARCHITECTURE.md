@@ -72,11 +72,11 @@ src/valuation/src/
   __tests__/unit/
 src/migrations/sql/             Shared schema, constraints, indexes, and grants
 src/migrations/migrate.py       Role setup and ordered SQL execution
+src/n8n/                       Inactive scheduler workflow drafts and operator guide
 deploy/compose.yaml            Service deployment and networks
 deploy/docker/                 Per-service Dockerfiles
 deploy/.env.example            Deployment configuration template
 deploy/tools/                  Deployment stage script and superseded-commit check
-deploy/n8n/                    Inactive scheduler workflow drafts and operator guide
 mpf-codex-handoff/fixtures/      Saved provider responses for deterministic tests
 ```
 
@@ -157,7 +157,7 @@ Invalidation rows carry an optional account and date bounds. Valuation marks mat
 
 API `/health` endpoints return readiness based on a database query and require no key. The worker container health check also checks database connectivity; it does not prove that its polling loop or a provider endpoint is healthy.
 
-No scheduler runs inside the stack, so scheduling is an operator step. The daily sequence is price sync, purchase processing, then valuation snapshots. The caller must poll the asynchronous crawler job until `succeeded` before proceeding and handle `partial` or `failed` results. Purchase processing must finish before snapshot creation. [The scheduling instructions](./README.md#schedule-requests-yourself) cover request examples and recovery guidance, and [`deploy/n8n/`](./deploy/n8n/README.md) holds inactive workflow drafts that an operator must import, configure, and activate. Nothing in this repository schedules work by itself.
+No scheduler runs inside the stack, so scheduling is an operator step. The daily sequence is price sync, purchase processing, then valuation snapshots. The caller must poll the asynchronous crawler job until `succeeded` before proceeding and handle `partial` or `failed` results. Purchase processing must finish before snapshot creation. [The scheduling instructions](./README.md#schedule-requests-yourself) cover request examples and recovery guidance, and [`src/n8n/`](./src/n8n/README.md) holds inactive workflow drafts that an operator must import, configure, and activate. Nothing in this repository schedules work by itself.
 
 ## Test boundaries
 
@@ -166,4 +166,4 @@ No scheduler runs inside the stack, so scheduling is an operator step. The daily
 - Python tests marked `integration` use `src/crawler/conftest.py` to build the Compose stack in the `mpf-itest` project, with separate database roles, a temporary database volume, the external `automation` network the harness creates when missing, and ephemeral host ports so the stack can run beside a development stack. They require Docker.
 - Live provider smoke tests carry the `live` marker and run only when selected with `-m live`; the offline commands exclude them. The stored Manulife `SHK122` history fixture supports deterministic parsing checks, while broader production backfill needs live validation.
 - [GitHub Actions](./.github/workflows/test.yml) runs the deployment-tooling and migration bootstrap checks, then the unmarked crawler-worker `pytest` run (Docker integration and live provider tests included), then each TypeScript service's `npm test`. The [Live Provider Endpoints workflow](./.github/workflows/live-endpoints.yml) is manual-only.
-- [deploy/n8n/workflows.test.cjs](./deploy/n8n/workflows.test.cjs) simulates the exported workflow graphs offline; the Test workflow does not run it.
+- [src/n8n/workflows.test.cjs](./src/n8n/workflows.test.cjs) simulates the exported workflow graphs offline; the Test workflow does not run it.

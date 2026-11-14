@@ -362,6 +362,7 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 │   │   └── frontend/           # Browser dashboard: HTML, CSS, JavaScript
 │   ├── purchase/               # Purchase endpoints; scheduled by n8n
 │   ├── valuation/              # Portfolio valuation endpoints; scheduled by n8n
+│   ├── n8n/                    # Inactive scheduler workflow drafts, tests, and guide
 │   └── migrations/
 │       ├── migrate.py          # Role setup and SQL migration runner
 │       └── sql/                # Shared schema and database grants
@@ -372,7 +373,6 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 │   ├── compose.shared-db.yaml  # Override for an existing PostgreSQL server
 │   ├── .env.example
 │   ├── docker/                 # One Dockerfile per service
-│   ├── n8n/                    # Inactive scheduler workflow drafts and guide
 │   └── tools/                  # Deployment stages and superseded-commit check
 ├── README.md
 ├── ARCHITECTURE.md
@@ -403,7 +403,7 @@ The migration runner creates the configured database if missing, creates or upda
 
 The stack does not run recurring API requests automatically. Configure your own scheduler (for example, cron, a systemd timer, or an external automation service) to send the requests below with your configured `X-API-Key`. You can also run them manually.
 
-For n8n, import the [inactive workflow drafts](./deploy/n8n/README.md). The recommended daily workflow defaults to 06:00 Hong Kong time and waits for the crawl to succeed before processing purchases, rebuilding stale valuations, and saving a snapshot. Standalone drafts are included for manual recovery or custom schedules; configure credentials and review a manual run before activation.
+For n8n, import the [inactive workflow drafts](./src/n8n/README.md). The recommended daily workflow defaults to 06:00 Hong Kong time and waits for the crawl to succeed before processing purchases, rebuilding stale valuations, and saving a snapshot. Standalone drafts are included for manual recovery or custom schedules; configure credentials and review a manual run before activation.
 
 | Order | Request | Purpose |
 | --- | --- | --- |
@@ -516,7 +516,7 @@ Run tests without Docker or live provider requests:
 .venv/bin/python -m pytest -q -m 'not integration and not live'
 .venv/bin/python -m unittest discover -s src/migrations -p 'test_*.py'
 node --test deploy/tools/*.test.cjs
-node --test deploy/n8n/workflows.test.cjs
+node --test src/n8n/workflows.test.cjs
 for service in src/crawler/api src/portfolio/backend src/purchase src/valuation; do
   (cd "$service" && npm run test:unit)
 done

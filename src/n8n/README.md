@@ -40,7 +40,7 @@ Daily purchase processing handles the selected date's month. If n8n misses the e
 Run from the repository root:
 
 ```bash
-node --test deploy/n8n/workflows.test.cjs
+node --test src/n8n/workflows.test.cjs
 ```
 
 The checks parse all exports, validate connections and safety settings, and simulate their actual Code/If/expression paths using fixture HTTP responses, including bounded polling, retries' stable idempotency expression, and downstream failure gates. They do not emulate n8n's import engine, credential binding, scheduler, persistence, or HTTP retries. Complete the manual import/run checks above before activation.

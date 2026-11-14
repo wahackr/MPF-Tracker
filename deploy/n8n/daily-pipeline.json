@@ -1,0 +1,459 @@
+{
+  "name": "MPF - Daily download, purchases and valuation",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "76e501aa-690a-5e05-bd62-2013380d3ede",
+      "name": "Manual run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "c82c9b6c-6aec-51e4-a1d0-97ace47d5b7b",
+      "name": "Daily 06:00 Hong Kong",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+      },
+      "id": "d04256f5-8329-55d6-a04d-2a485217b429",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/sync' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { provider: $('Configuration').first().json.provider, rolling_days: $('Configuration').first().json.rollingDays } }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $('Configuration').first().json.idempotencyKey }}"
+            }
+          ]
+        }
+      },
+      "id": "7206a3ef-9fd8-50b0-b569-1ef8add5ea4c",
+      "name": "Queue download",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/' + $('Queue download').first().json.job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "17803ae7-faa0-58d9-be8a-2cc070b7e6d5",
+      "name": "Read crawl job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $input.first().json;\nconst expectedId = $('Queue download').first().json.job_id;\nif (!expectedId || job.job_id !== expectedId) throw new Error('Crawler job ID missing or mismatched');\nif (job.status === 'succeeded') return [{ json: { ...job, crawlComplete: true } }];\nif (!['queued', 'running'].includes(job.status)) {\n  throw new Error(`Crawler ${job.job_id}: ${job.status}; ${job.error_message || JSON.stringify(job.result)}`);\n}\nif ($runIndex + 1 >= $('Configuration').first().json.maxPolls) {\n  throw new Error(`Crawler ${job.job_id}: polling limit reached; inspect the existing job before restarting`);\n}\nreturn [{ json: { ...job, crawlComplete: false } }];"
+      },
+      "id": "7cee3287-4634-5a60-a0ff-7c82733e8f15",
+      "name": "Check crawl result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c8e888e4-4ceb-5e52-b261-7f7ac6c1ae9c",
+              "leftValue": "={{ $json.crawlComplete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5f4e7d97-0447-5678-8d04-4cc58fae02e6",
+      "name": "Crawl succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "ec9ef784-5724-5d89-838d-486e9cbbaab0",
+      "name": "Wait 30 seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        260
+      ],
+      "webhookId": "3493c7ba-9fc6-5165-a61b-b9ba347f0682"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.purchaseUrl + '/v1/purchases/process' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+      },
+      "id": "d515c558-99d2-5102-80c9-85b78a0b103b",
+      "name": "Process purchases",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (!Number.isInteger(result.failed_events) || result.failed_events < 0 || !Number.isInteger(result.waiting_events) || result.waiting_events < 0) {\n  throw new Error('Unexpected purchase response');\n}\nif (result.failed_events > 0) throw new Error(`Purchase processing reported ${result.failed_events} failed events; inspect Process purchases output`);\n// Waiting events are retried on the next daily run. Keep the details in execution output.\nreturn [{ json: { ...result, needsReview: result.waiting_events > 0 } }];"
+      },
+      "id": "65d31bf3-8393-52d2-8e6e-2455f28b142b",
+      "name": "Check purchases",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/rebuild' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {} }}"
+      },
+      "id": "7a8793bd-ad0e-5280-bdbb-4415c1e3c1d1",
+      "name": "Rebuild stale valuations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/snapshot' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+      },
+      "id": "37a1f2f3-ee02-50a3-b9a5-b13d6d76938c",
+      "name": "Save valuation snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.calculation_status !== 'COMPLETE' || result.unpriced_fund_count !== 0) {\n  throw new Error(`Snapshot saved but needs review: ${result.calculation_status}, unpriced funds: ${result.unpriced_fund_count}`);\n}\nreturn [{ json: result }];"
+      },
+      "id": "f4b1fd40-3dc1-5bb6-8904-d6880f300cbc",
+      "name": "Check valuation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "height": 240,
+        "width": 520
+      },
+      "id": "91d4c39a-0b98-5ee1-b18a-476e9a8acaa7",
+      "name": "Setup and activation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -340
+      ]
+    }
+  ],
+  "connections": {
+    "Manual run": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 06:00 Hong Kong": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Queue download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue download": {
+      "main": [
+        [
+          {
+            "node": "Read crawl job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read crawl job": {
+      "main": [
+        [
+          {
+            "node": "Check crawl result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check crawl result": {
+      "main": [
+        [
+          {
+            "node": "Crawl succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crawl succeeded?": {
+      "main": [
+        [
+          {
+            "node": "Process purchases",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 30 seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30 seconds": {
+      "main": [
+        [
+          {
+            "node": "Read crawl job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process purchases": {
+      "main": [
+        [
+          {
+            "node": "Check purchases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check purchases": {
+      "main": [
+        [
+          {
+            "node": "Rebuild stale valuations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild stale valuations": {
+      "main": [
+        [
+          {
+            "node": "Save valuation snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save valuation snapshot": {
+      "main": [
+        [
+          {
+            "node": "Check valuation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hong_Kong",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "tags": []
+}

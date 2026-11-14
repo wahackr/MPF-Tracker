@@ -395,6 +395,8 @@ The migration runner creates the configured database if missing, creates or upda
 
 The stack does not run recurring API requests automatically. Configure your own scheduler (for example, cron, a systemd timer, or an external automation service) to send the requests below with your configured `X-API-Key`. You can also run them manually.
 
+For n8n, import the [inactive workflow drafts](./deploy/n8n/README.md). The recommended daily workflow defaults to 06:00 Hong Kong time and waits for the crawl to succeed before processing purchases, rebuilding stale valuations, and saving a snapshot. Standalone drafts are included for manual recovery or custom schedules; configure credentials and review a manual run before activation.
+
 | Order | Request | Purpose |
 | --- | --- | --- |
 | 1 | `POST http://localhost:8001/v1/crawl/jobs/sync` | Refresh both providers using a seven-day rolling window |

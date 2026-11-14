@@ -1,0 +1,293 @@
+{
+  "name": "MPF - Download prices",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "42df8577-62a9-5f48-a6ef-aecaa5848c9a",
+      "name": "Manual run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "ab41d847-17da-502c-87da-dc9fc66c6af8",
+      "name": "Daily 06:00 Hong Kong",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+      },
+      "id": "9ba40715-51a5-56ce-aba2-bb08084250be",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/sync' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { provider: $('Configuration').first().json.provider, rolling_days: $('Configuration').first().json.rollingDays } }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $('Configuration').first().json.idempotencyKey }}"
+            }
+          ]
+        }
+      },
+      "id": "9467ba95-5c12-5121-8bae-42efb6124c54",
+      "name": "Queue download",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Configuration').first().json.crawlerUrl + '/v1/crawl/jobs/' + $('Queue download').first().json.job_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "fe893bca-8c9c-5fb6-813b-9a478b8ab048",
+      "name": "Read crawl job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $input.first().json;\nconst expectedId = $('Queue download').first().json.job_id;\nif (!expectedId || job.job_id !== expectedId) throw new Error('Crawler job ID missing or mismatched');\nif (job.status === 'succeeded') return [{ json: { ...job, crawlComplete: true } }];\nif (!['queued', 'running'].includes(job.status)) {\n  throw new Error(`Crawler ${job.job_id}: ${job.status}; ${job.error_message || JSON.stringify(job.result)}`);\n}\nif ($runIndex + 1 >= $('Configuration').first().json.maxPolls) {\n  throw new Error(`Crawler ${job.job_id}: polling limit reached; inspect the existing job before restarting`);\n}\nreturn [{ json: { ...job, crawlComplete: false } }];"
+      },
+      "id": "bc96076b-7332-57c8-a214-1e80ba10bc94",
+      "name": "Check crawl result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3d918bbc-ec5b-57e6-b61d-163cfab1fd2c",
+              "leftValue": "={{ $json.crawlComplete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3aafc1a1-cdde-5d03-839c-abb469d85e77",
+      "name": "Crawl succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "913dc123-bbc5-53e8-9024-6321cc03810f",
+      "name": "Wait 30 seconds",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        260
+      ],
+      "webhookId": "ed0bd057-ac7b-5d93-9e30-497f9bb20be8"
+    },
+    {
+      "parameters": {
+        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "height": 240,
+        "width": 520
+      },
+      "id": "1448a70e-8e56-5c93-a77a-140aa501fcbe",
+      "name": "Setup and activation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -340
+      ]
+    }
+  ],
+  "connections": {
+    "Manual run": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 06:00 Hong Kong": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Queue download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue download": {
+      "main": [
+        [
+          {
+            "node": "Read crawl job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read crawl job": {
+      "main": [
+        [
+          {
+            "node": "Check crawl result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check crawl result": {
+      "main": [
+        [
+          {
+            "node": "Crawl succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crawl succeeded?": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Wait 30 seconds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 30 seconds": {
+      "main": [
+        [
+          {
+            "node": "Read crawl job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hong_Kong",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "tags": []
+}

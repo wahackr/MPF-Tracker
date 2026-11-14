@@ -9,7 +9,7 @@ See [README.md](./README.md) for installation, configuration, API usage, and tes
 ```mermaid
 flowchart LR
     Browser[Browser dashboard] --> Portfolio[Portfolio API]
-    Scheduler[User-managed scheduler or API client] --> Crawler[Crawler API]
+    Scheduler[User-managed scheduler such as n8n or an API client] --> Crawler[Crawler API]
     Scheduler --> Purchase[Purchase API]
     Scheduler --> Valuation[Valuation API]
     Portfolio -->|HTTP valuation proxy| Valuation
@@ -75,10 +75,12 @@ src/migrations/migrate.py       Role setup and ordered SQL execution
 deploy/compose.yaml            Service deployment and networks
 deploy/docker/                 Per-service Dockerfiles
 deploy/.env.example            Deployment configuration template
+deploy/tools/                  Deployment stage script and superseded-commit check
+deploy/n8n/                    Inactive scheduler workflow drafts and operator guide
 mpf-codex-handoff/fixtures/      Saved provider responses for deterministic tests
 ```
 
-TypeScript application wiring and domain operations stay within each service. Purchase and valuation isolate SQL in `libs/repository.ts` and arithmetic/date rules in `libs/rules.ts`. Portfolio routes perform their SQL operations using local database helpers. Provider adapters each own their fetch, parse, and persistence flow; they share HTTP retry and PostgreSQL helpers within the worker.
+TypeScript application wiring and domain operations stay within each service. Valuation isolates SQL in `libs/repository.ts`; purchase keeps its SQL in `main.ts` and `libs/db.ts`. Both keep arithmetic and date rules in `libs/rules.ts`. Portfolio routes perform their SQL operations using local database helpers. Provider adapters each own their fetch, parse, and persistence flow; they share HTTP retry and PostgreSQL helpers within the worker.
 
 ## Database contracts
 
@@ -117,13 +119,13 @@ The portfolio service serves `src/portfolio/frontend/` with Express and protects
 
 Portfolio owns account metadata and dated inputs. Allocation weights must total exactly `100`. Allocation and contribution-plan changes create versions with effective date ranges for a contribution stream. A reconciliation inserts an audit record and verified holdings baselines for the supplied funds, then requests snapshot invalidation in the same transaction.
 
-The holdings endpoint returns recorded baseline rows. The valuation service derives holdings as of a date. Dashboard valuation requests use portfolio proxy routes, which forward the API key to `VALUATION_API_URL`; portfolio does not duplicate the valuation calculations.
+The holdings endpoint returns recorded baseline rows. The valuation service derives holdings as of a date. Dashboard valuation requests use portfolio proxy routes, which forward the API key to `VALUATION_API_URL`; portfolio does not duplicate the valuation calculations. Confirming an actual contribution uses the same pattern: portfolio checks that the event belongs to the account, then forwards the request and its key to the Purchase API at `PURCHASE_API_URL`.
 
 ## Purchase processing
 
-Purchase processing executes synchronously in an HTTP request and a database transaction. It selects active plans for the requested date, processes the month containing that date, and skips contributions whose expected day has not yet arrived. Days exceeding the month length are clamped to month end.
+Purchase processing executes synchronously in an HTTP request and a database transaction. It selects plans whose effective range covers the requested date rather than filtering on the `active` column, processes the month containing that date, and skips contributions whose expected day has not yet arrived. Days exceeding the month length are clamped to month end.
 
-For each due plan, processing upserts an event keyed by plan and month, then resolves allocation rules effective at the month start. Missing allocations or weights that do not total `100` produce `FAILED_REVIEW`. Otherwise, each fund receives its percentage of the planned cash amount.
+For each due plan, processing upserts an event keyed by plan and month with status `EXPECTED`, then resolves allocation rules effective at the month start. Missing allocations or weights that do not total `100` produce `FAILED_REVIEW`. Otherwise, each fund receives its percentage of the planned cash amount.
 
 Estimation selects the first price row on or after the expected contribution date, up to 14 days later and no later than the processing date, and uses its bid price. Missing or nonpositive bids produce `WAITING_FOR_PRICE`. Available prices produce `ESTIMATED` transactions with units calculated from cash divided by price. Existing confirmed events are skipped, and estimated upserts preserve confirmed transactions.
 
@@ -151,16 +153,17 @@ Invalidation rows carry an optional account and date bounds. Valuation marks mat
 
 ## Deployment and scheduling
 
-[Compose](./deploy/compose.yaml) starts PostgreSQL, waits for its readiness check, runs migration, then starts the APIs and crawler worker. PostgreSQL persists under `./data/postgres`. All services join `mpf-internal`; the APIs also join the external network named by `N8N_NETWORK`. The optional `deploy/compose.shared-db.yaml` override excludes the bundled database and connects migration and application containers to `SHARED_POSTGRES_HOST:SHARED_POSTGRES_PORT`. In this mode the target database already exists, and the migration account manages the application roles, schema, and grants before the apps start.
+[Compose](./deploy/compose.yaml) starts PostgreSQL, waits for its readiness check, runs migration, then starts the APIs and crawler worker. PostgreSQL persists under `./data/postgres`. Services join the network named by `MPF_INTERNAL_NETWORK` (`mpf-internal` by default); the APIs also join the external network named by `N8N_NETWORK`. The optional `deploy/compose.shared-db.yaml` override excludes the bundled database and connects migration and application containers to `SHARED_POSTGRES_HOST:SHARED_POSTGRES_PORT`. In this mode the migration account connects to `postgres`, creates `POSTGRES_DB` when it is missing, and then manages the application roles, schema, and grants before the apps start.
 
 API `/health` endpoints return readiness based on a database query and require no key. The worker container health check also checks database connectivity; it does not prove that its polling loop or a provider endpoint is healthy.
 
-Users must provide their own scheduler or make API calls manually. The daily sequence is price sync, purchase processing, then valuation snapshots. The caller must poll the asynchronous crawler job until `succeeded` before proceeding and handle `partial` or `failed` results. Purchase processing must finish before snapshot creation. See [the scheduling instructions](./README.md#schedule-requests-yourself) for request examples and recovery guidance. No scheduler or importable workflows are included in this repository.
+No scheduler runs inside the stack, so scheduling is an operator step. The daily sequence is price sync, purchase processing, then valuation snapshots. The caller must poll the asynchronous crawler job until `succeeded` before proceeding and handle `partial` or `failed` results. Purchase processing must finish before snapshot creation. [The scheduling instructions](./README.md#schedule-requests-yourself) cover request examples and recovery guidance, and [`deploy/n8n/`](./deploy/n8n/README.md) holds inactive workflow drafts that an operator must import, configure, and activate. Nothing in this repository schedules work by itself.
 
 ## Test boundaries
 
-- TypeScript unit suites live under each service's `src/__tests__/unit/` and run through `npm test`, which builds the service before using Node's test runner.
+- TypeScript suites use Jest and live under each service's `src/__tests__/`. `npm test` builds the service, provisions a temporary PostgreSQL container, and runs the unit and database suites; `npm run test:unit` runs the unit suites without a database.
 - Python tests live under `src/crawler/worker/src/__tests__/`. Provider fixture tests mock `httpx.Client.request` using saved responses; some are located in `integration/` without the `integration` marker and belong to the offline suite.
-- Tests marked `integration` use `src/crawler/conftest.py` to build the Compose stack in the `mpf-itest` project, with separate database roles, an isolated network, and a temporary database volume. They require Docker and use the default application host ports.
-- Live provider smoke tests require `MPF_RUN_LIVE_TESTS=1`; they are excluded from routine offline testing. The stored Manulife `SHK122` history fixture supports deterministic parsing checks, while broader production backfill needs live validation.
-- [GitHub Actions](./.github/workflows/test.yml) runs offline Python and TypeScript tests, then the Docker integration suite on pushes and pull requests.
+- Python tests marked `integration` use `src/crawler/conftest.py` to build the Compose stack in the `mpf-itest` project, with separate database roles, a temporary database volume, the external `automation` network the harness creates when missing, and ephemeral host ports so the stack can run beside a development stack. They require Docker.
+- Live provider smoke tests carry the `live` marker and run only when selected with `-m live`; the offline commands exclude them. The stored Manulife `SHK122` history fixture supports deterministic parsing checks, while broader production backfill needs live validation.
+- [GitHub Actions](./.github/workflows/test.yml) runs the deployment-tooling and migration bootstrap checks, then the unmarked crawler-worker `pytest` run (Docker integration and live provider tests included), then each TypeScript service's `npm test`. The [Live Provider Endpoints workflow](./.github/workflows/live-endpoints.yml) is manual-only.
+- [deploy/n8n/workflows.test.cjs](./deploy/n8n/workflows.test.cjs) simulates the exported workflow graphs offline; the Test workflow does not run it.

@@ -126,8 +126,9 @@ See [`deploy/.env.example`](./deploy/.env.example) for the complete Compose conf
 | `WORKER_POLL_INTERVAL_SECONDS` | Idle job polling interval; default `2` |
 | `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` | Worker lease duration and heartbeat interval; defaults to `90` and `15` |
 | `N8N_NETWORK` | Existing external Docker network; default `automation` |
+| `MPF_INTERNAL_NETWORK` | Stack-internal Docker network name; default `mpf-internal` |
 
-The default Compose deployment connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000`.
+The default Compose deployment connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000` and its `PURCHASE_API_URL` to `http://mpf-purchase:8000`.
 
 ## First-use workflow
 
@@ -263,6 +264,11 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 - **Purpose:** list processed contribution events with their estimated or confirmed transactions.
 - **Returns:** `200 {account_id, count: N, items: [{event_id, period, expected_date, amount, status, created_at, contribution_stream, transactions: [{fund_id, trade_date, cash_amount, unit_price, units_delta, status}]}]}`, newest first.
 
+#### `POST /v1/accounts/{account_id}/contribution-history/{event_id}/confirm`
+- **Purpose:** replace one event's estimated transactions with actual statement values — the dashboard's **Enter actual** action. The event must belong to the account, otherwise `404 {"detail":"Contribution event not found for this account"}`.
+- **Body parameters:** forwarded unchanged to `POST /v1/purchases/events/{event_id}/confirm`; see that endpoint for validation.
+- **Returns:** the Purchase API's status and JSON body, passed through. The request forwards the caller's `X-API-Key` to `PURCHASE_API_URL` (default `http://mpf-purchase:8000`).
+
 #### `GET /v1/accounts/{account_id}/reconciliations`
 - **Purpose:** list reconciliation records with the verified balances recorded on each date.
 - **Returns:** `200 {account_id, items: [{reconciliation_id, effective_date, notes, created_at, holdings: [{fund_id, units}]}]}`, newest first.
@@ -302,7 +308,7 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 #### `POST /v1/purchases/events/{event_id}/confirm`
 - **Purpose:** confirm the complete transaction set for one contribution event, replacing estimates and marking the event `CONFIRMED`. Funds omitted from the payload are removed; all supplied transactions are stored as `CONFIRMED`.
 - **Path parameter:** `event_id` (UUID; unknown returns `404 {"detail":"Contribution event not found"}`).
-- **Body parameters:** `trade_date` (`YYYY-MM-DD`, default trade date); `transactions[]` (at least one) with `fund_id`, `cash_amount`, `unit_price`, `units_delta`, and optional per-transaction `trade_date`. `fund_id` values must be unique (duplicates return `400 {"detail":"transactions[].fund_id must be unique"}`).
+- **Body parameters:** `trade_date` (`YYYY-MM-DD`, required as the event's default transaction date); `transactions[]` (at least one) with `fund_id`, `cash_amount`, `unit_price`, `units_delta`, and an optional per-transaction `trade_date` that falls back to the event-level date. `fund_id` values must be unique (duplicates return `400 {"detail":"transactions[].fund_id must be unique"}`).
 - **Returns:** `200 {event_id, confirmed_transactions: N}`. Snapshots are invalidated from the earliest previous or supplied trade date onward.
 
 ### Valuation — port 8004
@@ -365,7 +371,9 @@ Every `/v1/*` route requires the `X-API-Key` header (a missing or wrong key retu
 │   ├── compose.yaml            # Full stack with bundled PostgreSQL
 │   ├── compose.shared-db.yaml  # Override for an existing PostgreSQL server
 │   ├── .env.example
-│   └── docker/                 # One Dockerfile per service
+│   ├── docker/                 # One Dockerfile per service
+│   ├── n8n/                    # Inactive scheduler workflow drafts and guide
+│   └── tools/                  # Deployment stages and superseded-commit check
 ├── README.md
 ├── ARCHITECTURE.md
 └── .github/workflows/           # Tests and live provider checks
@@ -394,6 +402,8 @@ The migration runner creates the configured database if missing, creates or upda
 ## Schedule requests yourself
 
 The stack does not run recurring API requests automatically. Configure your own scheduler (for example, cron, a systemd timer, or an external automation service) to send the requests below with your configured `X-API-Key`. You can also run them manually.
+
+For n8n, import the [inactive workflow drafts](./deploy/n8n/README.md). The recommended daily workflow defaults to 06:00 Hong Kong time and waits for the crawl to succeed before processing purchases, rebuilding stale valuations, and saving a snapshot. Standalone drafts are included for manual recovery or custom schedules; configure credentials and review a manual run before activation.
 
 | Order | Request | Purpose |
 | --- | --- | --- |
@@ -494,7 +504,7 @@ Local development uses Node.js 22, npm, and Python 3.12, matching the container 
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt -r src/crawler/worker/requirements.txt
+.venv/bin/pip install -r requirements.txt -r src/crawler/worker/requirements.txt -r src/migrations/requirements.txt
 for service in src/crawler/api src/portfolio/backend src/purchase src/valuation; do
   (cd "$service" && npm ci)
 done
@@ -504,12 +514,20 @@ Run tests without Docker or live provider requests:
 
 ```bash
 .venv/bin/python -m pytest -q -m 'not integration and not live'
+.venv/bin/python -m unittest discover -s src/migrations -p 'test_*.py'
+node --test deploy/tools/*.test.cjs
+node --test deploy/n8n/workflows.test.cjs
 for service in src/crawler/api src/portfolio/backend src/purchase src/valuation; do
   (cd "$service" && npm run test:unit)
 done
 ```
 
+The migration bootstrap tests and the deployment-tooling checks are the extra suites CI
+runs alongside the service suites; the n8n draft checks are an offline check only.
+
 Each TypeScript service also supports `npm run build` and `npm start`. For a host-run API, provide `API_KEY`, `PORT`, and its service database settings using `DB_HOST=127.0.0.1` and the published database port. A host-run portfolio service also needs `VALUATION_API_URL=http://localhost:8004`. The applications do not automatically load `.env`.
+
+The portfolio service also reads `PURCHASE_API_URL` (default `http://mpf-purchase:8000`) when the dashboard confirms a contribution.
 
 Python provider tests use saved responses under `mpf-codex-handoff/fixtures` and mock `httpx.Client.request`. The marked integration tests use the Docker harness in `src/crawler/conftest.py`, a separate Compose project (`mpf-itest`), and a temporary database volume:
 
@@ -529,12 +547,11 @@ Live crawler smoke tests call real provider endpoints:
   src/crawler/worker/src/__tests__/live/test_hsbc_live.py
 ```
 
-Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs suites one at a time on pushes and pull requests: Python crawler worker (including integration and live tests), crawler API, portfolio, purchase, then valuation. Each suite must pass before the next starts. CI checks Docker availability first, and each TypeScript service's `npm test` shell script creates, migrates, and removes its own temporary PostgreSQL database.
+Use `test_manulife_live.py` for the corresponding Manulife check. [GitHub Actions](./.github/workflows/test.yml) runs suites one at a time on pushes and pull requests: deployment tooling, migration bootstrap, Python crawler worker (including integration and live tests), crawler API, portfolio, purchase, then valuation. Each suite must pass before the next starts. CI checks Docker availability before the Python suites, and each TypeScript service's `npm test` shell script creates, migrates, and removes its own temporary PostgreSQL database.
 
 CI prints per-file coverage for the Python worker and for TypeScript modules
-loaded by each service's unit tests. Crawler API, portfolio, purchase, and valuation use Jest coverage across all source modules. Python coverage includes integration and
-live tests. Node's built-in coverage report omits modules that the unit tests
-never load; requests made to running TypeScript services by the Docker
+reported by each service's unit tests. Crawler API, portfolio, purchase, and valuation use Jest coverage across every compiled module, so a module the unit tests never load is reported at 0%. Python coverage includes integration and
+live tests. Requests made to running TypeScript services by the Docker
 integration tests are not included in those TypeScript percentages.
 
 To run both providers' live endpoint checks on demand, open the [Live Provider Endpoints workflow](./.github/workflows/live-endpoints.yml) in GitHub Actions and choose **Run workflow**. It has no schedule. GitHub shows this manual trigger after the workflow file reaches the default branch.

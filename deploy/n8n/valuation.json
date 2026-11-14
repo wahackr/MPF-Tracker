@@ -1,0 +1,203 @@
+{
+  "name": "MPF - Rebuild and snapshot valuations",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "cbea6326-67fd-5095-96e6-88ff89577b79",
+      "name": "Manual run",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "b8685ad6-ad89-509d-abcf-5a1e0d297a71",
+      "name": "Daily 06:00 Hong Kong",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Public settings only. Select the API key credential on each HTTP Request node.\nconst settings = {\n  crawlerUrl: 'http://mpf-crawler-api:8000',\n  purchaseUrl: 'http://mpf-purchase:8000',\n  valuationUrl: 'http://mpf-valuation:8000',\n  provider: 'all',\n  rollingDays: 7,\n  maxPolls: 60,\n  // Empty means today's Hong Kong date; use YYYY-MM-DD for manual recovery.\n  asOfDate: '',\n  // Empty means all accounts. Crawler always refreshes the chosen provider(s).\n  accountId: '',\n};\nreturn [{ json: {\n  ...settings,\n  asOfDate: settings.asOfDate || $now.setZone('Asia/Hong_Kong').toISODate(),\n  idempotencyKey: `mpf-n8n-${$workflow.id}-${$execution.id}`,\n} }];"
+      },
+      "id": "4ae3277d-4381-5332-aa74-c22fbf831ca3",
+      "name": "Configuration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/rebuild' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {} }}"
+      },
+      "id": "64cc0f0b-9fa3-5711-9ca1-6e1ddb06ae7f",
+      "name": "Rebuild stale valuations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Configuration').first().json.valuationUrl + '/v1/valuation/snapshot' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 300000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { as_of_date: $('Configuration').first().json.asOfDate, ...($('Configuration').first().json.accountId ? { account_id: $('Configuration').first().json.accountId } : {}) } }}"
+      },
+      "id": "b202ebd3-8881-557b-80b8-caf134e079f7",
+      "name": "Save valuation snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        960,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json;\nif (result.calculation_status !== 'COMPLETE' || result.unpriced_fund_count !== 0) {\n  throw new Error(`Snapshot saved but needs review: ${result.calculation_status}, unpriced funds: ${result.unpriced_fund_count}`);\n}\nreturn [{ json: result }];"
+      },
+      "id": "3f0b1635-73f8-54f2-b15f-5ab818ab0a3c",
+      "name": "Check valuation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Inactive draft \u2014 issue #26\nSelect a Header Auth credential (X-API-Key) on EVERY HTTP Request node.\nReview Configuration and README.md before manual execution.\nFor daily automation publish ONLY daily-pipeline.json.\nStandalone drafts have no cross-workflow dependency checks.\nWaiting purchases remain visible in Check purchases output.",
+        "height": 240,
+        "width": 520
+      },
+      "id": "45511554-5b1a-502e-bd43-e50c9130ac59",
+      "name": "Setup and activation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -340
+      ]
+    }
+  ],
+  "connections": {
+    "Manual run": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 06:00 Hong Kong": {
+      "main": [
+        [
+          {
+            "node": "Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Configuration": {
+      "main": [
+        [
+          {
+            "node": "Rebuild stale valuations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rebuild stale valuations": {
+      "main": [
+        [
+          {
+            "node": "Save valuation snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save valuation snapshot": {
+      "main": [
+        [
+          {
+            "node": "Check valuation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Hong_Kong",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "tags": []
+}

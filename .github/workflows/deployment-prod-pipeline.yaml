@@ -29,6 +29,7 @@ jobs:
       COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME || 'mpf-tracker-prod' }}
       MPF_INTERNAL_NETWORK: ${{ vars.MPF_INTERNAL_NETWORK || 'mpf-tracker-prod-internal' }}
       DB_MODE: ${{ vars.DB_MODE || 'shared' }}
+      DEPLOY_DOCKER_CONTEXT: prod
       API_KEY: ${{ secrets.API_KEY }}
       TZ: Asia/Hong_Kong
       API_BIND_ADDRESS: ${{ vars.API_BIND_ADDRESS || '0.0.0.0' }}

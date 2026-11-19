@@ -127,6 +127,7 @@ See [`deploy/.env.example`](./deploy/.env.example) for the complete Compose conf
 | `WORKER_LEASE_SECONDS`, `WORKER_HEARTBEAT_SECONDS` | Worker lease duration and heartbeat interval; defaults to `90` and `15` |
 | `N8N_NETWORK` | Existing external Docker network; default `automation` |
 | `MPF_INTERNAL_NETWORK` | Stack-internal Docker network name; default `mpf-internal` |
+| `DEPLOY_DOCKER_CONTEXT` | Optional deployment-only Docker context; defaults to local Docker socket when unset |
 
 The default Compose deployment connects migration and application containers to `mpf-db:5432` and maps their database names, users, and passwords from `.env`. Host-run tools use `127.0.0.1` and `POSTGRES_HOST_PORT`; exported host connection settings do not change container connections. It also sets the portfolio service's `VALUATION_API_URL` to `http://mpf-valuation:8000` and its `PURCHASE_API_URL` to `http://mpf-purchase:8000`.
 

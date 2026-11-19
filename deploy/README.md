@@ -10,7 +10,7 @@ The workflow uses the repository’s self-hosted runner with `runs-on: self-host
 
 ### Runner setup
 
-Register a Linux self-hosted runner directly under this personal repository’s **Settings → Actions → Runners**. The runner needs Bash, Docker with Compose 2.24.4+, and permission to access the local Docker socket at `/var/run/docker.sock`. No Docker context setup is needed. The pipeline creates the Docker network named by `N8N_NETWORK` (default `automation`) if it is missing and reuses it if it exists. If n8n already uses a different Docker network, set `N8N_NETWORK` to that network name to connect the applications to it. The runner also needs outbound access to GitHub, Docker Hub, npm, and PyPI for checkout and builds.
+Register a Linux self-hosted runner directly under this personal repository’s **Settings → Actions → Runners**. The runner needs Bash, Docker with Compose 2.24.4+, and permission to access the local Docker socket at `/var/run/docker.sock`. The deployment workflows set `DEPLOY_DOCKER_CONTEXT` to the workflow environment name (`dev` or `prod`) so Docker must have matching contexts configured on the runner. The pipeline creates the Docker network named by `N8N_NETWORK` (default `automation`) if it is missing and reuses it if it exists. If n8n already uses a different Docker network, set `N8N_NETWORK` to that network name to connect the applications to it. The runner also needs outbound access to GitHub, Docker Hub, npm, and PyPI for checkout and builds.
 
 ### GitHub configuration
 

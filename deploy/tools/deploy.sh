@@ -9,7 +9,7 @@ case "$stage" in validate|build|deploy) ;; *) echo 'Usage: deploy.sh validate|bu
 for key in COMPOSE_PROJECT_NAME MPF_INTERNAL_NETWORK DB_MODE API_BIND_ADDRESS \
   CRAWLER_API_HOST_PORT PORTFOLIO_API_HOST_PORT PURCHASE_API_HOST_PORT VALUATION_API_HOST_PORT \
   POSTGRES_DB POSTGRES_USER POSTGRES_BIND_ADDRESS POSTGRES_HOST_PORT POSTGRES_DATA_DIR \
-  SHARED_POSTGRES_HOST SHARED_POSTGRES_PORT CRAWLER_DB_USER PORTFOLIO_DB_USER PURCHASE_DB_USER \
+  SHARED_POSTGRES_HOST SHARED_POSTGRES_PORT DEPLOY_DOCKER_CONTEXT CRAWLER_DB_USER PORTFOLIO_DB_USER PURCHASE_DB_USER \
   VALUATION_DB_USER WORKER_POLL_INTERVAL_SECONDS WORKER_LEASE_SECONDS WORKER_HEARTBEAT_SECONDS N8N_NETWORK; do
   if [[ "${!key:-}" == CHANGE_ME ]]; then
     echo "Replace the GitHub deployment placeholder: $key" >&2
@@ -31,12 +31,19 @@ if ! [[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
   exit 1
 fi
 
-# Use the runner's local Docker socket; ignore inherited remote connection settings.
+# Use an explicit deployment context when configured; otherwise use the runner's local Docker socket.
 # Never use an untracked .env or an inherited profile on a persistent runner.
 export COMPOSE_PROFILES=''
-unset DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH
-export DOCKER_HOST=unix:///var/run/docker.sock
-compose=(docker compose --env-file /dev/null -f deploy/compose.yaml)
+unset DOCKER_CONTEXT
+docker=(docker)
+if [[ -n "${DEPLOY_DOCKER_CONTEXT:-}" ]]; then
+  docker+=(--context "$DEPLOY_DOCKER_CONTEXT")
+  unset DOCKER_HOST DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+else
+  unset DOCKER_TLS_VERIFY DOCKER_CERT_PATH
+  export DOCKER_HOST=unix:///var/run/docker.sock
+fi
+compose=("${docker[@]}" compose --env-file /dev/null -f deploy/compose.yaml)
 case "$DB_MODE" in
   shared)
     if [[ -z "${SHARED_POSTGRES_HOST:-}" ]]; then
@@ -63,19 +70,19 @@ for key in CRAWLER_API_HOST_PORT PORTFOLIO_API_HOST_PORT PURCHASE_API_HOST_PORT 
 done
 
 ensure_network() {
-  if ! docker network inspect "$N8N_NETWORK" >/dev/null 2>&1; then
+  if ! "${docker[@]}" network inspect "$N8N_NETWORK" >/dev/null 2>&1; then
     echo "Creating Docker network: $N8N_NETWORK"
     # Another deployment may create this shared network between inspect and create.
-    if ! docker network create "$N8N_NETWORK" >/dev/null; then
-      docker network inspect "$N8N_NETWORK" >/dev/null
+    if ! "${docker[@]}" network create "$N8N_NETWORK" >/dev/null; then
+      "${docker[@]}" network inspect "$N8N_NETWORK" >/dev/null
     fi
   fi
 }
 
 case "$stage" in
   validate)
-    docker info >/dev/null
-    docker compose version
+    "${docker[@]}" info >/dev/null
+    "${docker[@]}" compose version
     "${compose[@]}" config --quiet
     ensure_network
     ;;
